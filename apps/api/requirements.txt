@@ -1,0 +1,48 @@
+# Web framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+alembic==1.14.0
+pgvector==0.3.6
+psycopg2-binary==2.9.10      # alembic sync migrations
+
+# Auth
+python-jose[cryptography]==3.3.0
+httpx==0.28.0
+
+# Cache
+redis[asyncio]==5.2.0
+
+# Graph DB
+neo4j==5.27.0
+
+# Search
+elasticsearch[async]==8.17.0
+
+# AI — GitHub Models via azure-ai-inference
+azure-ai-inference==1.0.0b7
+azure-core==1.32.0
+
+# Task queue
+celery[redis]==5.4.0
+kombu==5.4.2
+
+# Validation
+pydantic==2.10.3
+pydantic-settings==2.7.0
+email-validator==2.2.0
+
+# Utilities
+python-dotenv==1.0.1
+boto3==1.35.86
+tenacity==9.0.0
+beautifulsoup4==4.12.3
+lxml==5.3.0
+
+# Dev / test
+pytest==8.3.4
+pytest-asyncio==0.24.0
