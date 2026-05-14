@@ -107,7 +107,9 @@ def _build_tree(folders: list[Folder]) -> list[FolderTree]:
     roots: list[FolderTree] = []
 
     for f in folders:
-        node = FolderTree.model_validate(f)
+        # Validate base attributes first so Pydantic doesn't try to lazy-load 'children'
+        base = FolderResponse.model_validate(f)
+        node = FolderTree(**base.model_dump(), children=[])
         folder_map[f.id] = node
 
     for f in folders:

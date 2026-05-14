@@ -115,7 +115,7 @@ export type Folder = {
 
 export const foldersApi = {
   tree: () => apiFetch<Folder[]>("/folders"),
-  create: (data: { name: string; parent_id?: string; emoji?: string; color?: string }) =>
+  create: (data: { name: string; parent_id?: string; emoji?: string; color?: string; tags?: string[] }) =>
     apiFetch<Folder>("/folders", { method: "POST", body: JSON.stringify(data) }),
   update: (id: string, data: Partial<{ name: string; emoji: string; color: string }>) =>
     apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),

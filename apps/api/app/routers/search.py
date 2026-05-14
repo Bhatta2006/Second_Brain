@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_, and_, func
+from sqlalchemy import select, or_, and_, func, cast, String
 from sqlalchemy.dialects.postgresql import array
 
 from app.deps import get_current_user, get_db_session
@@ -25,11 +25,15 @@ async def search_items(
     filters = [Item.user_id == user_id, Item.deleted_at.is_(None)]
 
     if q:
+        search_pattern = f"%{q}%"
         filters.append(
             or_(
-                Item.title.ilike(f"%{q}%"),
-                Item.summary.ilike(f"%{q}%"),
-                Item.raw_text.ilike(f"%{q}%"),
+                Item.title.ilike(search_pattern),
+                Item.ai_title.ilike(search_pattern),
+                Item.summary.ilike(search_pattern),
+                Item.raw_text.ilike(search_pattern),
+                Item.source_url.ilike(search_pattern),
+                Item.content_type.ilike(search_pattern),
             )
         )
     if content_type:

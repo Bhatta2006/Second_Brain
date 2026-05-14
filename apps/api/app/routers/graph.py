@@ -130,6 +130,20 @@ async def _graph_postgres(
     limit: int,
     db: AsyncSession,
 ) -> GraphResponse:
+    from sqlalchemy.orm import selectinload
+
+    # ── Step 1: Load ALL items (so every file/text/link appears as a node) ──
+    item_query = (
+        select(Item)
+        .options(selectinload(Item.folder))
+        .where(Item.user_id == user_id, Item.deleted_at.is_(None))
+        .order_by(Item.created_at.desc())
+        .limit(limit)
+    )
+    all_items = (await db.execute(item_query)).scalars().all()
+    item_map = {i.id: i for i in all_items}
+
+    # ── Step 2: Load edges ─────────────────────────────────────────────────
     edge_rows = (
         await db.execute(
             select(Edge)
@@ -138,32 +152,17 @@ async def _graph_postgres(
         )
     ).scalars().all()
 
-    item_ids: set[uuid.UUID] = set()
-    for e in edge_rows:
-        item_ids.add(e.source_id)
-        item_ids.add(e.target_id)
-
-    if item_id:
+    # ── Step 3: If ego graph, filter to neighbourhood ──────────────────────
+    if item_id and item_id in item_map:
         neighbourhood: set[uuid.UUID] = {item_id}
         for e in edge_rows:
             if e.source_id == item_id:
                 neighbourhood.add(e.target_id)
             elif e.target_id == item_id:
                 neighbourhood.add(e.source_id)
-        item_ids &= neighbourhood
+        item_map = {k: v for k, v in item_map.items() if k in neighbourhood}
 
-    item_ids = set(list(item_ids)[:limit])
-    items = (
-        await db.execute(
-            select(Item).where(
-                Item.id.in_(item_ids),
-                Item.user_id == user_id,
-                Item.deleted_at.is_(None),
-            )
-        )
-    ).scalars().all()
-
-    item_map = {i.id: i for i in items}
+    # ── Step 4: Build nodes from ALL items ─────────────────────────────────
     nodes = [
         GraphNode(
             id=i.id,
@@ -175,20 +174,23 @@ async def _graph_postgres(
             view_count=i.view_count,
             is_starred=i.is_starred,
         )
-        for i in items
+        for i in item_map.values()
     ]
+
+    # ── Step 5: Filter edges to only those connecting visible items ─────────
     edges = [
         GraphEdge(source=e.source_id, target=e.target_id, type=e.edge_type, weight=e.weight)
         for e in edge_rows
         if e.source_id in item_map and e.target_id in item_map
     ]
+
     return GraphResponse(
         nodes=nodes,
         edges=edges,
         meta=GraphMeta(
             total_nodes=len(nodes),
             total_edges=len(edges),
-            truncated=len(item_ids) >= limit,
+            truncated=len(item_map) >= limit,
             min_weight=min_weight,
         ),
     )

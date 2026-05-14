@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 from sqlalchemy.orm import selectinload
@@ -23,7 +23,20 @@ async def ingest_item(
 ):
     content_type = _detect_content_type(payload)
     meta = payload.metadata or {}
-    title = meta.get("filename") or None
+    title = meta.get("custom_name") or meta.get("filename") or None
+    
+    # Store file size if available
+    file_size = meta.get("size")
+    mime_type = meta.get("mime_type")
+    
+    # Pick up manual tags from metadata if provided
+    manual_tags = meta.get("tags") or []
+    
+    # Only store raw_text for actual text content, not base64-encoded files
+    raw_text = None
+    if payload.type == "text":
+        raw_text = payload.text
+    
     item = Item(
         user_id=user_id,
         folder_id=payload.hint_folder_id,
@@ -31,15 +44,23 @@ async def ingest_item(
         content_type=content_type,
         source_url=payload.url,
         storage_key=payload.file_key,
-        raw_text=payload.text if payload.type == "text" else None,
+        file_size=file_size,
+        mime_type=mime_type,
+        raw_text=raw_text,
         metadata_=meta,
+        tags=manual_tags if manual_tags else None,
     )
     db.add(item)
     await db.commit()
     await db.refresh(item)
 
-    from app.tasks.ai_processing import process_item
-    process_item.delay(str(item.id), str(user_id))
+    # Fire async AI processing (non-blocking)
+    try:
+        from app.tasks.ai_processing import process_item
+        process_item.delay(str(item.id), str(user_id))
+    except Exception:
+        # If Celery/Redis isn't running, don't block the save
+        pass
 
     return IngestResponse(item_id=item.id)
 
@@ -177,12 +198,17 @@ def _detect_content_type(payload: IngestRequest) -> str:
     if payload.type == "url":
         return "url"
     if payload.file_key:
-        ext = payload.file_key.rsplit(".", 1)[-1].lower()
-        type_map = {
-            "pdf": "pdf", "docx": "doc", "xlsx": "doc", "pptx": "doc",
-            "jpg": "image", "jpeg": "image", "png": "image", "webp": "image", "heic": "image",
-            "mp3": "audio", "mp4": "video", "wav": "audio",
-            "txt": "text", "md": "text",
-        }
-        return type_map.get(ext, "text")
+        return _detect_content_type_from_filename(payload.file_key)
     return "text"
+
+
+def _detect_content_type_from_filename(filename: str) -> str:
+    """Detect content type from file extension."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    type_map = {
+        "pdf": "pdf", "docx": "doc", "xlsx": "doc", "pptx": "doc",
+        "jpg": "image", "jpeg": "image", "png": "image", "webp": "image", "heic": "image", "gif": "image",
+        "mp3": "audio", "mp4": "video", "wav": "audio", "m4a": "audio",
+        "txt": "text", "md": "text", "csv": "text",
+    }
+    return type_map.get(ext, "file")

@@ -28,6 +28,17 @@ export default function InboxPage() {
     queryClient.invalidateQueries({ queryKey: ["items"] });
   }
 
+  async function handleDeleteItem(item: Item) {
+    if (!confirm(`Delete item "${item.title || 'Untitled'}"?`)) return;
+    try {
+      await itemsApi.delete(item.id);
+      if (selected?.id === item.id) setSelected(null);
+      queryClient.invalidateQueries({ queryKey: ["items"] });
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete item");
+    }
+  }
+
   return (
     <div className="flex h-full">
       {/* Main content */}
@@ -66,6 +77,7 @@ export default function InboxPage() {
                     item={item}
                     onStar={handleStar}
                     onClick={setSelected}
+                    onDelete={handleDeleteItem}
                   />
                 ))}
               </div>
@@ -213,7 +225,7 @@ export default function InboxPage() {
   );
 }
 
-const ENTITY_LABELS: Record<string, string> = {
+const ENTITY_LABELS: Record<keyof NonNullable<Item["entities"]>, string> = {
   people: "People",
   places: "Places",
   organisations: "Organisations",
@@ -232,7 +244,7 @@ function EntitiesSection({ entities }: { entities: NonNullable<Item["entities"]>
         <div key={s.key}>
           <p className="text-xs text-muted-foreground mb-1">{ENTITY_LABELS[s.key]}</p>
           <div className="flex flex-wrap gap-1">
-            {s.items.map((v) => (
+            {s.items.map((v: string) => (
               <span key={v} className="text-xs bg-muted rounded-full px-2 py-0.5">{v}</span>
             ))}
           </div>

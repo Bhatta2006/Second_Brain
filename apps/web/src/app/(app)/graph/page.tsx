@@ -23,6 +23,18 @@ const NODE_HALO = "#a5b4fc";
 const NODE_STAR_RING = "#f2a623";
 const DIMMED_ALPHA = 0.12;
 
+// Content-type → node color mapping
+const NODE_TYPE_COLORS: Record<string, string> = {
+  text: "#60a5fa",    // blue
+  url: "#34d399",     // green
+  pdf: "#f87171",     // red
+  image: "#fbbf24",   // amber
+  audio: "#a78bfa",   // violet
+  video: "#fb923c",   // orange
+  doc: "#f472b6",     // pink
+  file: "#94a3b8",    // slate
+};
+
 // Adaptive labels (Obsidian-style)
 const LABEL_HIDE_BELOW = 0.8;   // zoom level below which labels disappear entirely
 const LABEL_FADE_FULL = 1.6;    // zoom level at which labels reach full opacity
@@ -280,6 +292,16 @@ export default function GraphPage() {
             </div>
           ))}
         </div>
+
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-muted-foreground">Node types</p>
+          {Object.entries(NODE_TYPE_COLORS).map(([type, color]) => (
+            <div key={type} className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+              <span className="capitalize">{type}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Node detail panel */}
@@ -361,8 +383,8 @@ export default function GraphPage() {
       {!isError && data?.meta.total_nodes === 0 && !isLoading && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
           <div className="text-center">
-            <p className="text-lg font-medium">No connections yet</p>
-            <p className="text-sm mt-1">Save more items — connections appear after AI processing.</p>
+            <p className="text-lg font-medium">No items yet</p>
+            <p className="text-sm mt-1">Save some items — they will appear as nodes in your knowledge graph.</p>
           </div>
         </div>
       )}
@@ -392,10 +414,11 @@ export default function GraphPage() {
             ctx.fill();
           }
 
-          // Base circle
+          // Base circle — color by content type
+          const nodeColor = NODE_TYPE_COLORS[n.type] ?? NODE_DEFAULT;
           ctx.beginPath();
           ctx.arc(n.x!, n.y!, radius, 0, 2 * Math.PI);
-          ctx.fillStyle = dimmed ? applyAlpha(NODE_DEFAULT, DIMMED_ALPHA) : NODE_DEFAULT;
+          ctx.fillStyle = dimmed ? applyAlpha(nodeColor, DIMMED_ALPHA) : nodeColor;
           ctx.fill();
 
           // Gold ring for starred items

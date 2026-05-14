@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  Star, FileText, Link, Image as ImageIcon, Volume2, Video, File, Sparkles, AlertCircle,
+  Star, FileText, Link, Image as ImageIcon, Volume2, Video, File, Sparkles, AlertCircle, Trash2
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Item } from "@/lib/api";
@@ -20,6 +20,7 @@ type Props = {
   item: Item;
   onClick?: (item: Item) => void;
   onStar?: (item: Item) => void;
+  onDelete?: (item: Item) => void;
 };
 
 function confidenceColor(c: number | null) {
@@ -29,7 +30,7 @@ function confidenceColor(c: number | null) {
   return "bg-red-500";
 }
 
-export function ItemCard({ item, onClick, onStar }: Props) {
+export function ItemCard({ item, onClick, onStar, onDelete }: Props) {
   const Icon = CONTENT_TYPE_ICONS[item.content_type] ?? File;
   const usingAiTitle = !item.title && !!item.ai_title;
   const displayTitle = item.title ?? item.ai_title ?? item.source_url ?? "Untitled";
@@ -73,6 +74,18 @@ export function ItemCard({ item, onClick, onStar }: Props) {
           >
             <Star className="h-4 w-4" fill={item.is_starred ? "currentColor" : "none"} />
           </button>
+          {onDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(item);
+              }}
+              className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
+              title="Delete item"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

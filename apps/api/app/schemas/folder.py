@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 
 class FolderCreate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: str
     parent_id: uuid.UUID | None = None
     emoji: str | None = None
@@ -11,6 +13,8 @@ class FolderCreate(BaseModel):
 
 
 class FolderUpdate(BaseModel):
+    model_config = {"extra": "ignore"}
+
     name: str | None = None
     emoji: str | None = None
     color: str | None = None

@@ -32,12 +32,6 @@ class Settings(BaseSettings):
     supabase_service_role_key: str = ""
     supabase_jwt_secret: str = ""
 
-    # AWS
-    aws_access_key_id: str = ""
-    aws_secret_access_key: str = ""
-    aws_region: str = "ap-south-1"
-    s3_bucket: str = "secondbrain-local"
-
     # GitHub Models (unified AI endpoint)
     github_token: str = ""
     github_models_endpoint: str = "https://models.github.ai/inference"
