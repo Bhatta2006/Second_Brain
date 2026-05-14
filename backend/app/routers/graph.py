@@ -20,6 +20,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 
+try:
+    from neo4j.exceptions import ServiceUnavailable as Neo4jUnavailable
+except ImportError:
+    Neo4jUnavailable = Exception  # type: ignore[assignment,misc]
+
 from app.config import settings
 from app.deps import get_current_user, get_db_session
 from app.graph.neo4j_client import neo4j_client
@@ -52,7 +57,10 @@ async def get_graph(
     uid = str(user_id)
 
     if settings.use_neo4j_graph:
-        return await _graph_neo4j(uid, item_id, depth, min_weight, limit)
+        try:
+            return await _graph_neo4j(uid, item_id, depth, min_weight, limit)
+        except Neo4jUnavailable as exc:
+            log.warning("Neo4j unavailable, falling back to PostgreSQL graph: %s", exc)
     return await _graph_postgres(user_id, item_id, min_weight, limit, db)
 
 

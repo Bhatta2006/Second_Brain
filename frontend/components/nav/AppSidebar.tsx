@@ -13,7 +13,14 @@ import {
   LogOut,
   ChevronDown,
   ChevronRight,
+  Plug,
+  CheckCircle2,
+  Loader2,
+  XCircle,
+  Unplug,
 } from "lucide-react";
+import { ModelConnectDialog } from "@/components/nav/ModelConnectDialog";
+import { useLLMStore } from "@/stores/llmStore";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { foldersApi, type Folder } from "@/lib/api";
@@ -53,6 +60,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingFolder, setEditingFolder] = useState<Folder | null>(null);
   const [parentId, setParentId] = useState<string | undefined>(undefined);
+  const [modelDialogOpen, setModelDialogOpen] = useState(false);
+
+  const llmStatus = useLLMStore((s) => s.status);
+  const llmSelectedModel = useLLMStore((s) => s.selectedModel);
 
   const { data: folders } = useQuery({
     queryKey: ["folders"],
@@ -72,7 +83,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   async function handleDeleteFolder(folder: Folder) {
-    if (!confirm(`Delete "${folder.name}"? Items will be moved to Inbox.`)) return;
+    if (!confirm(`Delete "${folder.name}"? Items will be moved to Inbox.`))
+      return;
     try {
       await foldersApi.delete(folder.id);
       queryClient.invalidateQueries({ queryKey: ["folders"] });
@@ -82,7 +94,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
   }
 
-  async function handleSubmitFolder(data: { name: string; emoji: string; color: string; tags: string[] }) {
+  async function handleSubmitFolder(data: {
+    name: string;
+    emoji: string;
+    color: string;
+    tags: string[];
+  }) {
     const { tags, ...folderData } = data;
     if (editingFolder) {
       await foldersApi.update(editingFolder.id, folderData);
@@ -169,7 +186,31 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           </SidebarGroup>
         </SidebarContent>
 
-        <SidebarFooter className="p-4 border-t border-sidebar-border">
+        <SidebarFooter className="p-4 border-t border-sidebar-border space-y-3">
+          {/* Model connect button */}
+          <button
+            onClick={() => setModelDialogOpen(true)}
+            className="w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
+          >
+            {llmStatus === "connected" ? (
+              <CheckCircle2 className="h-4 w-4 shrink-0 text-green-500" />
+            ) : llmStatus === "pending" ? (
+              <Loader2 className="h-4 w-4 shrink-0 text-yellow-500 animate-spin" />
+            ) : llmStatus === "expired" ? (
+              <XCircle className="h-4 w-4 shrink-0 text-red-500" />
+            ) : (
+              <Unplug className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="flex-1 truncate text-left">
+              {llmStatus === "connected" && llmSelectedModel
+                ? llmSelectedModel
+                : llmStatus === "pending"
+                  ? "Awaiting auth…"
+                  : "Connect AI Model"}
+            </span>
+            <Plug className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+
           <div className="flex items-center gap-3">
             <Avatar className="size-8">
               <AvatarFallback className="text-xs">
@@ -177,7 +218,9 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              <p className="text-xs text-muted-foreground truncate">
+                {user?.email}
+              </p>
             </div>
             <Button
               variant="ghost"
@@ -197,6 +240,11 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         onClose={() => setDialogOpen(false)}
         onSubmit={handleSubmitFolder}
         folder={editingFolder}
+      />
+
+      <ModelConnectDialog
+        open={modelDialogOpen}
+        onClose={() => setModelDialogOpen(false)}
       />
     </>
   );

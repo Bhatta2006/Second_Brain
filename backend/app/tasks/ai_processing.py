@@ -140,25 +140,25 @@ async def _process(item_id: str, user_id: str) -> None:
         await db.commit()
         log.info("AI processing complete for %s (conf=%.2f)", item_id, confidence)
 
-    # Re-index to Elasticsearch with AI-enriched data
-    try:
-        from app.search.es_client import index_item as es_index
-        await es_index(
-            user_id=user_id,
-            item_id=item_id,
-            title=classification.get("title") or item.title,
-            summary=summary,
-            raw_text=content if not item.raw_text else item.raw_text,
-            tags=classification.get("tags") or [],
-            content_type=item.content_type,
-            folder_id=str(item.folder_id) if item.folder_id else None,
-            entities=classification.get("entities") or {},
-            created_at=item.created_at.isoformat(),
-            is_starred=item.is_starred,
-        )
-        log.info("Re-indexed item %s to ES after AI processing", item_id)
-    except Exception as exc:
-        log.warning("Failed to re-index item %s to ES: %s", item_id, exc)
+        # Re-index to Elasticsearch with AI-enriched data (inside session so loop is alive)
+        try:
+            from app.search.es_client import index_item as es_index
+            await es_index(
+                user_id=user_id,
+                item_id=item_id,
+                title=classification.get("title") or item.title,
+                summary=summary,
+                raw_text=content if not item.raw_text else item.raw_text,
+                tags=classification.get("tags") or [],
+                content_type=item.content_type,
+                folder_id=str(item.folder_id) if item.folder_id else None,
+                entities=classification.get("entities") or {},
+                created_at=item.created_at.isoformat(),
+                is_starred=item.is_starred,
+            )
+            log.info("Re-indexed item %s to ES after AI processing", item_id)
+        except Exception as exc:
+            log.warning("Failed to re-index item %s to ES: %s", item_id, exc)
 
     await _trigger_sync(item_id, user_id)
 

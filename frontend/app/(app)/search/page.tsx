@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search as SearchIcon, Loader2 } from "lucide-react";
 import { searchApi } from "@/lib/api";
@@ -12,24 +12,24 @@ import { Badge } from "@/components/ui/badge";
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [submittedQuery, setSubmittedQuery] = useState("");
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedQuery(query);
-      setPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [query]);
+  function handleSearch() {
+    const trimmed = query.trim();
+    if (trimmed === submittedQuery) return;
+    setSubmittedQuery(trimmed);
+    setPage(1);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") handleSearch();
+  }
 
   const { data, isLoading } = useQuery({
-    queryKey: ["search", debouncedQuery, page],
-    queryFn: () =>
-      debouncedQuery.trim()
-        ? searchApi.search(debouncedQuery, { page })
-        : Promise.resolve({ total: 0, page: 1, results: [] }),
-    enabled: debouncedQuery.trim().length > 0,
+    queryKey: ["search", submittedQuery, page],
+    queryFn: () => searchApi.search(submittedQuery, { page }),
+    enabled: submittedQuery.trim().length > 0,
   });
 
   return (
@@ -43,14 +43,21 @@ export default function SearchPage() {
             </p>
           </div>
 
-          <div className="relative">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search your knowledge base..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-10"
-            />
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search your knowledge base…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                className="pl-10"
+              />
+            </div>
+            <Button onClick={handleSearch} disabled={!query.trim()}>
+              <SearchIcon className="h-4 w-4 mr-1" />
+              Search
+            </Button>
           </div>
 
           {isLoading && (
@@ -59,7 +66,7 @@ export default function SearchPage() {
             </div>
           )}
 
-          {!isLoading && debouncedQuery.trim() && data && (
+          {!isLoading && submittedQuery.trim() && data && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
@@ -93,13 +100,16 @@ export default function SearchPage() {
               {data.results.length === 0 ? (
                 <Card>
                   <CardContent className="p-6 text-center text-muted-foreground">
-                    No results found for &quot;{debouncedQuery}&quot;
+                    No results found for &quot;{submittedQuery}&quot;
                   </CardContent>
                 </Card>
               ) : (
                 <div className="space-y-3">
                   {data.results.map((result) => (
-                    <Card key={result.id} className="hover:shadow-md transition-shadow cursor-pointer">
+                    <Card
+                      key={result.id}
+                      className="hover:shadow-md transition-shadow cursor-pointer"
+                    >
                       <CardHeader className="p-4 pb-2">
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
@@ -107,7 +117,10 @@ export default function SearchPage() {
                               {result.title || "Untitled"}
                             </CardTitle>
                           </div>
-                          <Badge variant="outline" className="text-[10px] font-mono shrink-0">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] font-mono shrink-0"
+                          >
                             {result.content_type}
                           </Badge>
                         </div>
@@ -127,7 +140,11 @@ export default function SearchPage() {
                         {result.tags.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {result.tags.map((tag) => (
-                              <Badge key={tag} variant="secondary" className="text-[10px]">
+                              <Badge
+                                key={tag}
+                                variant="secondary"
+                                className="text-[10px]"
+                              >
                                 #{tag}
                               </Badge>
                             ))}
@@ -141,7 +158,7 @@ export default function SearchPage() {
             </div>
           )}
 
-          {!debouncedQuery.trim() && (
+          {!submittedQuery.trim() && (
             <div className="text-center py-16 text-muted-foreground">
               <SearchIcon className="mx-auto h-12 w-12 mb-4 opacity-20" />
               <p className="text-lg font-medium">Start typing to search</p>

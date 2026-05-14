@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.search.es_client import search_items as es_search
 from app.ai.embeddings import embed_text
-from app.tasks._db import task_session as AsyncSessionLocal
 
 log = logging.getLogger(__name__)
 
@@ -20,12 +19,13 @@ log = logging.getLogger(__name__)
 RRF_K = 60
 
 # Minimum similarity threshold for semantic results
-SEMANTIC_THRESHOLD = 0.60
+SEMANTIC_THRESHOLD = 0.30
 
 
 async def semantic_search(
     user_id: str,
     query: str,
+    db: AsyncSession,
     content_type: str | None = None,
     folder_id: str | None = None,
     tags: list[str] | None = None,
@@ -39,67 +39,65 @@ async def semantic_search(
     query_embedding = await embed_text(query)
     emb_str = f"[{','.join(str(x) for x in query_embedding)}]"
 
-    async with AsyncSessionLocal() as db:
-        # Build filter conditions
-        filter_conditions = ["user_id = :user_id", "deleted_at IS NULL", "embedding IS NOT NULL"]
-        params: dict[str, Any] = {
-            "user_id": user_id,
-            "emb": emb_str,
-            "threshold": SEMANTIC_THRESHOLD,
-            "limit": top_k,
-        }
+    # Build filter conditions
+    filter_conditions = ["user_id = :user_id", "deleted_at IS NULL", "embedding IS NOT NULL"]
+    params: dict[str, Any] = {
+        "user_id": user_id,
+        "emb": emb_str,
+        "threshold": SEMANTIC_THRESHOLD,
+        "limit": top_k,
+    }
 
-        if content_type:
-            filter_conditions.append("content_type = :content_type")
-            params["content_type"] = content_type
+    if content_type:
+        filter_conditions.append("content_type = :content_type")
+        params["content_type"] = content_type
 
-        if folder_id:
-            filter_conditions.append("folder_id = :folder_id")
-            params["folder_id"] = folder_id
+    if folder_id:
+        filter_conditions.append("folder_id = :folder_id")
+        params["folder_id"] = folder_id
 
-        if tags:
-            # Check if any tag overlaps
-            filter_conditions.append("tags && :tags")  # array overlap operator
-            params["tags"] = tags
+    if tags:
+        filter_conditions.append("tags && :tags")
+        params["tags"] = tags
 
-        where_clause = " AND ".join(filter_conditions)
+    where_clause = " AND ".join(filter_conditions)
 
-        sql = f"""
-            SELECT
-                id::text AS id,
-                COALESCE(title, ai_title, 'Untitled') AS title,
-                summary,
-                content_type,
-                folder_id::text AS folder_id,
-                tags,
-                is_starred,
-                created_at,
-                1 - (embedding <=> CAST(:emb AS vector)) AS similarity
-            FROM items
-            WHERE {where_clause}
-              AND 1 - (embedding <=> CAST(:emb AS vector)) >= :threshold
-            ORDER BY embedding <=> CAST(:emb AS vector)
-            LIMIT :limit
-        """
+    sql = f"""
+        SELECT
+            id::text AS id,
+            COALESCE(title, ai_title, 'Untitled') AS title,
+            summary,
+            content_type,
+            folder_id::text AS folder_id,
+            tags,
+            is_starred,
+            created_at,
+            1 - (embedding <=> CAST(:emb AS vector)) AS similarity
+        FROM items
+        WHERE {where_clause}
+          AND 1 - (embedding <=> CAST(:emb AS vector)) >= :threshold
+        ORDER BY embedding <=> CAST(:emb AS vector)
+        LIMIT :limit
+    """
 
-        result = await db.execute(text(sql), params)
-        rows = result.fetchall()
+    result = await db.execute(text(sql), params)
+    rows = result.fetchall()
 
-        results = []
-        for row in rows:
-            results.append({
-                "id": row.id,
-                "title": row.title,
-                "summary": row.summary,
-                "content_type": row.content_type,
-                "folder_id": row.folder_id,
-                "tags": row.tags or [],
-                "created_at": row.created_at,
-                "is_starred": row.is_starred,
-                "similarity": float(row.similarity),
-            })
+    results = []
+    for row in rows:
+        results.append({
+            "id": row.id,
+            "title": row.title,
+            "summary": row.summary,
+            "content_type": row.content_type,
+            "folder_id": row.folder_id,
+            "tags": row.tags or [],
+            "created_at": row.created_at,
+            "is_starred": row.is_starred,
+            "similarity": float(row.similarity),
+        })
 
-        return results
+    return results
 
 
 def _reciprocal_rank_fusion(
@@ -160,6 +158,7 @@ def _reciprocal_rank_fusion(
 async def hybrid_search_rrf(
     user_id: str,
     query: str,
+    db: AsyncSession,
     content_type: str | None = None,
     folder_id: str | None = None,
     tags: list[str] | None = None,
@@ -190,6 +189,7 @@ async def hybrid_search_rrf(
     semantic_results = await semantic_search(
         user_id=user_id,
         query=query,
+        db=db,
         content_type=content_type,
         folder_id=folder_id,
         tags=tags,

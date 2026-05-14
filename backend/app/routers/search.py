@@ -78,6 +78,7 @@ async def search_items(
             semantic_results = await semantic_search(
                 user_id=uid,
                 query=q,
+                db=db,
                 content_type=content_type,
                 folder_id=str(folder_id) if folder_id else None,
                 tags=tags if tags else None,
@@ -99,6 +100,7 @@ async def search_items(
             hybrid_response = await hybrid_search_rrf(
                 user_id=uid,
                 query=q,
+                db=db,
                 content_type=content_type,
                 folder_id=str(folder_id) if folder_id else None,
                 tags=tags if tags else None,
@@ -139,6 +141,7 @@ async def semantic_search_endpoint(
     results = await semantic_search(
         user_id=str(user_id),
         query=query,
+        db=db,
         content_type=content_type,
         folder_id=str(folder_id) if folder_id else None,
         tags=tags if tags else None,

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.routers import health, items, folders, search, graph
+from app.routers import health, items, folders, search, graph, llm
 
 log = logging.getLogger(__name__)
 
@@ -71,12 +71,19 @@ else:
 
 
 # ── Global exception handler to ensure CORS headers on 500 errors ─────────
+# FastAPI middleware does NOT wrap exception handlers, so we must inject
+# Access-Control-Allow-Origin manually here.
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     log.error("Unhandled exception on %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
         content={"detail": f"Internal server error: {type(exc).__name__}: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        },
     )
 
 
@@ -87,3 +94,4 @@ app.include_router(items.router, prefix=API_PREFIX)
 app.include_router(folders.router, prefix=API_PREFIX)
 app.include_router(search.router, prefix=API_PREFIX)
 app.include_router(graph.router, prefix=API_PREFIX)
+app.include_router(llm.router, prefix=API_PREFIX)
