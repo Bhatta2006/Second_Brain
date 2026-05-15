@@ -247,7 +247,7 @@ export type ChatSessionMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  created_at: string;
+  created_at?: string;
 };
 
 export type ContextItemStub = {
