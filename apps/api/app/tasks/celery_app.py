@@ -2,10 +2,21 @@ from celery import Celery
 from celery.schedules import crontab
 from app.config import settings
 
+_redis_url = settings.redis_url
+
+# Upstash and other managed Redis providers use rediss:// (TLS).
+# Celery requires explicit ssl_cert_reqs when using rediss://.
+_broker_use_ssl = None
+_redis_backend_use_ssl = None
+if _redis_url.startswith("rediss://"):
+    _ssl_opts = {"ssl_cert_reqs": "CERT_NONE"}
+    _broker_use_ssl = _ssl_opts
+    _redis_backend_use_ssl = _ssl_opts
+
 celery_app = Celery(
     "secondbrain",
-    broker=settings.redis_url,
-    backend=settings.redis_url,
+    broker=_redis_url,
+    backend=_redis_url,
     include=[
         "app.tasks.edge_generation",
         "app.tasks.sync",
@@ -19,6 +30,8 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    broker_use_ssl=_broker_use_ssl,
+    redis_backend_use_ssl=_redis_backend_use_ssl,
     task_acks_late=True,                 # tasks re-queued if worker dies mid-run
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,        # one task at a time per worker process
