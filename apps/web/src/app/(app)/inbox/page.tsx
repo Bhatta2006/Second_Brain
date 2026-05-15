@@ -2,16 +2,18 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { X, ExternalLink, Star, Sparkles, AlertCircle } from "lucide-react";
+import { X, ExternalLink, Star, Sparkles, AlertCircle, Eye } from "lucide-react";
 import { itemsApi, type Item } from "@/lib/api";
 import { ItemCard } from "@/components/items/ItemCard";
 import { UploadZone } from "@/components/upload/UploadZone";
+import { FileViewer } from "@/components/items/FileViewer";
 import { cn } from "@/lib/utils";
 
 export default function InboxPage() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Item | null>(null);
+  const [viewingItem, setViewingItem] = useState<Item | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["items", { page }],
@@ -49,13 +51,29 @@ export default function InboxPage() {
           {isLoading ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="h-32 rounded-lg bg-muted animate-pulse" />
+                <div key={i} className="h-32 rounded-lg border border-border bg-card p-4 space-y-3 overflow-hidden">
+                  <div className="flex items-center gap-2">
+                    <div className="h-8 w-8 rounded-md bg-muted animate-pulse" />
+                    <div className="h-4 w-40 rounded bg-muted animate-pulse" />
+                  </div>
+                  <div className="h-3 w-full rounded bg-muted animate-pulse" />
+                  <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
+                  <div className="flex gap-1">
+                    <div className="h-5 w-16 rounded-full bg-muted animate-pulse" />
+                    <div className="h-5 w-12 rounded-full bg-muted animate-pulse" />
+                  </div>
+                </div>
               ))}
             </div>
           ) : data?.results.length === 0 ? (
-            <div className="text-center py-16 text-muted-foreground">
-              <p className="text-lg font-medium">Your inbox is empty</p>
-              <p className="text-sm mt-1">Save a URL, text, or file to get started.</p>
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-3">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-muted">
+                <Sparkles className="h-8 w-8 opacity-40" />
+              </div>
+              <div className="text-center">
+                <p className="text-base font-medium text-foreground">Your inbox is empty</p>
+                <p className="text-sm mt-1">Paste a URL, drop a file, or write a note above.</p>
+              </div>
             </div>
           ) : (
             <>
@@ -98,7 +116,7 @@ export default function InboxPage() {
 
       {/* Detail panel */}
       {selected && (
-        <div className="fixed right-0 top-0 bottom-0 w-80 bg-card border-l border-border shadow-xl z-20 flex flex-col">
+        <div className="fixed right-0 top-0 bottom-0 w-80 bg-card border-l border-border shadow-xl z-20 flex flex-col animate-in slide-in-from-right duration-200">
           <div className="flex items-center justify-between p-4 border-b border-border">
             <span className="text-xs font-mono uppercase bg-muted px-2 py-0.5 rounded">
               {selected.content_type}
@@ -173,6 +191,16 @@ export default function InboxPage() {
               </a>
             )}
 
+            {(selected.storage_key || selected.content_type === "text" || selected.content_type === "url") && (
+              <button
+                onClick={() => setViewingItem(selected)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-primary py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                <Eye className="h-3.5 w-3.5" />
+                {selected.storage_key ? "View file" : selected.content_type === "url" ? "View page content" : "View content"}
+              </button>
+            )}
+
             {selected.summary && (
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase">Summary</p>
@@ -208,6 +236,10 @@ export default function InboxPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {viewingItem && (
+        <FileViewer item={viewingItem} onClose={() => setViewingItem(null)} />
       )}
     </div>
   );

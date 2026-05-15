@@ -1,13 +1,85 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { Send } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  Send,
+  Settings,
+  X,
+  Paperclip,
+  FileText,
+  Plus,
+  MessageSquare,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getAccessToken } from "@/lib/supabase";
+import { type Item, chatSessionsApi, type ChatSessionData, type ContextItemStub } from "@/lib/api";
+import { ItemPickerDialog } from "@/components/items/ItemPickerDialog";
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+type ModelProvider = "github" | "openai" | "anthropic" | "gemini" | "custom";
+
+type ModelSettings = {
+  provider: ModelProvider;
+  apiKey: string;
+  model: string;
+  baseUrl: string;
+};
 
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+};
+
+type ChatSession = ChatSessionData & { messages: Message[] };
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+const DEFAULT_SETTINGS: ModelSettings = {
+  provider: "github",
+  apiKey: "",
+  model: "gpt-4o-mini",
+  baseUrl: "",
+};
+
+const PROVIDER_LABELS: Record<ModelProvider, string> = {
+  github: "GitHub Models",
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  gemini: "Google Gemini",
+  custom: "Custom (OpenAI-compatible)",
+};
+
+const PROVIDER_MODELS: Record<ModelProvider, string[]> = {
+  github: [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "Meta-Llama-3.1-70B-Instruct",
+    "Meta-Llama-3.1-8B-Instruct",
+    "Phi-3.5-mini-instruct",
+    "Mistral-large",
+    "Cohere-command-r-plus",
+  ],
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+  anthropic: [
+    "claude-3-5-sonnet-20241022",
+    "claude-3-5-haiku-20241022",
+    "claude-3-haiku-20240307",
+    "claude-3-opus-20240229",
+  ],
+  gemini: [
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-2.0-flash-thinking-exp",
+  ],
+  custom: [],
 };
 
 const SUGGESTED_PROMPTS = [
@@ -17,15 +89,212 @@ const SUGGESTED_PROMPTS = [
   "What are my starred items?",
 ];
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+// ── Session helpers ────────────────────────────────────────────────────────────
+
+function sessionTitle(msgs: Message[]): string {
+  const first = msgs.find((m) => m.role === "user")?.content ?? "New chat";
+  return first.length > 52 ? first.slice(0, 50) + "…" : first;
+}
+
+function groupByDate(sessions: ChatSession[]): { label: string; items: ChatSession[] }[] {
+  const now = Date.now();
+  const DAY = 86_400_000;
+  const groups: Record<string, ChatSession[]> = {};
+
+  for (const s of sessions) {
+    const age = now - new Date(s.updated_at).getTime();
+    let label: string;
+    if (age < DAY) label = "Today";
+    else if (age < 2 * DAY) label = "Yesterday";
+    else if (age < 7 * DAY) label = "This week";
+    else if (age < 30 * DAY) label = "This month";
+    else label = "Older";
+    (groups[label] ??= []).push(s);
+  }
+
+  const ORDER = ["Today", "Yesterday", "This week", "This month", "Older"];
+  return ORDER.filter((l) => groups[l]).map((l) => ({ label: l, items: groups[l] }));
+}
+
+// ── Settings helpers ───────────────────────────────────────────────────────────
+
+function loadSettings(): ModelSettings {
+  if (typeof window === "undefined") return DEFAULT_SETTINGS;
+  try {
+    const raw = localStorage.getItem("sb_chat_model");
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {}
+  return DEFAULT_SETTINGS;
+}
+
+function persistSettings(s: ModelSettings) {
+  try {
+    localStorage.setItem("sb_chat_model", JSON.stringify(s));
+  } catch {}
+}
+
+// ── API call ───────────────────────────────────────────────────────────────────
+
+async function callModel(
+  messages: { role: string; content: string }[],
+  settings: ModelSettings,
+  contextItemIds: string[] = []
+): Promise<string> {
+  if (!settings.apiKey) {
+    throw new Error("No API key configured. Click the model button above to add one.");
+  }
+
+  const token = await getAccessToken();
+  const body = {
+    provider: settings.provider,
+    api_key: settings.apiKey,
+    model: settings.model,
+    base_url: settings.baseUrl,
+    messages,
+    context_item_ids: contextItemIds,
+  };
+
+  const res = await fetch(`${API_URL}/api/v1/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any)?.detail ?? `API error ${res.status}`);
+  }
+  const data: any = await res.json();
+  return data.content as string;
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<ModelSettings>(DEFAULT_SETTINGS);
+  const [draft, setDraft] = useState<ModelSettings>(DEFAULT_SETTINGS);
+  const [contextItems, setContextItems] = useState<Item[]>([]);
+  const contextItemsRef = useRef<Item[]>([]);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [sessionId, setSessionId] = useState<string>("");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const s = loadSettings();
+    setSettings(s);
+    setDraft(s);
+    setSessionId(crypto.randomUUID());
+    chatSessionsApi.list().then(setSessions).catch(() => {});
+  }, []);
+
+  // ── Sync refs and auto-scroll ──────────────────────────────────────────────
+
+  useEffect(() => {
+    contextItemsRef.current = contextItems;
+  }, [contextItems]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // ── Auto-save session (debounced) ──────────────────────────────────────────
+
+  const saveSession = useCallback((id: string, msgs: Message[], ctxItems: Item[]) => {
+    if (!id || msgs.length === 0) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      chatSessionsApi
+        .upsert(id, {
+          title: sessionTitle(msgs),
+          messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+          context_item_stubs: ctxItems.map((i) => ({
+            id: i.id,
+            title: i.title,
+            ai_title: i.ai_title,
+          })),
+        })
+        .then((saved) => {
+          setSessions((prev) => {
+            const idx = prev.findIndex((s) => s.id === saved.id);
+            const next = idx >= 0 ? [...prev] : [saved, ...prev];
+            if (idx >= 0) next[idx] = { ...saved, messages: msgs };
+            return next.sort(
+              (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+            );
+          });
+        })
+        .catch(() => {});
+    }, 800);
+  }, []);
+
+  useEffect(() => {
+    saveSession(sessionId, messages, contextItems);
+  }, [messages, sessionId, saveSession]);
+
+  // ── Session management ─────────────────────────────────────────────────────
+
+  function startNewChat() {
+    setSessionId(crypto.randomUUID());
+    setMessages([]);
+    setContextItems([]);
+    contextItemsRef.current = [];
+  }
+
+  function openSession(session: ChatSession) {
+    setSessionId(session.id);
+    const msgs: Message[] = (session.messages ?? []).map((m) => ({
+      id: m.id,
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
+    setMessages(msgs);
+    const restored = (session.context_item_stubs ?? []).map((stub) => ({
+      ...stub,
+      user_id: "", folder_id: null, folder: null, content_type: "",
+      source_url: null, storage_key: null, file_size: null, mime_type: null,
+      summary: null, tags: [], entities: null, confidence: null,
+      needs_review: false, is_starred: false, view_count: 0,
+      created_at: "", updated_at: "",
+    } as Item));
+    setContextItems(restored);
+    contextItemsRef.current = restored;
+  }
+
+  function deleteSessionById(id: string, e: React.MouseEvent) {
+    e.stopPropagation();
+    chatSessionsApi.delete(id).catch(() => {});
+    setSessions((prev) => prev.filter((s) => s.id !== id));
+    if (id === sessionId) startNewChat();
+  }
+
+  // ── Settings ───────────────────────────────────────────────────────────────
+
+  function openSettings() {
+    setDraft(settings);
+    setShowSettings(true);
+  }
+
+  function saveAndClose() {
+    persistSettings(draft);
+    setSettings(draft);
+    setShowSettings(false);
+  }
+
+  // ── Send message ───────────────────────────────────────────────────────────
 
   async function sendMessage(text: string) {
     if (!text.trim()) return;
@@ -34,110 +303,442 @@ export default function ChatPage() {
     setInput("");
     setLoading(true);
 
-    // Placeholder response — Phase 3 will wire up the RAG chat API with SSE streaming
-    await new Promise((r) => setTimeout(r, 1000));
-    const assistantMsg: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content:
-        "Chat is coming in Phase 3! This is where the RAG-powered assistant will search your knowledge base and return answers with citations.",
-    };
-    setMessages((m) => [...m, assistantMsg]);
-    setLoading(false);
+    try {
+      const history = [...messages, userMsg].map((m) => ({ role: m.role, content: m.content }));
+      const ids = contextItemsRef.current.map((i) => i.id);
+      const reply = await callModel(history, settings, ids);
+      const assistantMsg: Message = { id: (Date.now() + 1).toString(), role: "assistant", content: reply };
+      setMessages((m) => {
+        const next = [...m, assistantMsg];
+        saveSession(sessionId, next, contextItemsRef.current);
+        return next;
+      });
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        {
+          id: (Date.now() + 1).toString(),
+          role: "assistant",
+          content: `⚠️ ${err instanceof Error ? err.message : "Something went wrong"}`,
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const isConfigured = !!settings.apiKey && !!settings.model;
+  const modelChip = isConfigured
+    ? `${PROVIDER_LABELS[settings.provider]} · ${settings.model}`
+    : "Configure model →";
+  const grouped = groupByDate(sessions);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
-    <div className="flex flex-col h-full max-w-3xl mx-auto p-6">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold">Chat</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Ask anything about your knowledge base.
-        </p>
-      </div>
-
-      <div className="flex-1 overflow-auto space-y-4 mb-4">
-        {messages.length === 0 && (
-          <div className="py-12 space-y-4">
-            <p className="text-center text-muted-foreground text-sm">
-              Try one of these prompts:
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {SUGGESTED_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => sendMessage(prompt)}
-                  className="rounded-lg border border-border bg-card p-3 text-sm text-left hover:bg-accent transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          </div>
+    <div className="flex h-full overflow-hidden">
+      {/* ── Sessions sidebar ───────────────────────────────────────────────── */}
+      <div
+        className={cn(
+          "flex flex-col border-r border-border bg-muted/30 transition-all duration-200 shrink-0",
+          sidebarOpen ? "w-60" : "w-10"
         )}
-
-        {messages.map((msg) => (
-          <div
-            key={msg.id}
-            className={cn(
-              "flex",
-              msg.role === "user" ? "justify-end" : "justify-start"
-            )}
+      >
+        {/* Sidebar toggle + new chat */}
+        <div className="flex items-center gap-1 p-2 border-b border-border">
+          <button
+            onClick={() => setSidebarOpen((o) => !o)}
+            className="flex items-center justify-center h-7 w-7 rounded hover:bg-muted text-muted-foreground shrink-0"
+            title={sidebarOpen ? "Collapse" : "Expand"}
           >
-            <div
-              className={cn(
-                "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-sm"
-                  : "bg-card border border-border rounded-bl-sm"
-              )}
+            {sidebarOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </button>
+          {sidebarOpen && (
+            <button
+              onClick={startNewChat}
+              className="flex items-center gap-1.5 flex-1 rounded-md px-2 py-1 text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
             >
-              {msg.content}
-            </div>
-          </div>
-        ))}
+              <Plus className="h-3.5 w-3.5" />
+              New chat
+            </button>
+          )}
+        </div>
 
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-4 py-3">
-              <div className="flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
-                    style={{ animationDelay: `${i * 150}ms` }}
-                  />
+        {/* Session list */}
+        {sidebarOpen && (
+          <div className="flex-1 overflow-auto py-2">
+            {grouped.length === 0 && (
+              <p className="px-3 py-6 text-center text-xs text-muted-foreground">
+                No previous chats
+              </p>
+            )}
+            {grouped.map(({ label, items }) => (
+              <div key={label} className="mb-3">
+                <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </p>
+                {items.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => openSession(s)}
+                    className={cn(
+                      "group flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-muted transition-colors rounded-md mx-0.5",
+                      s.id === sessionId && "bg-accent"
+                    )}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="flex-1 truncate text-xs">{s.title}</span>
+                    <button
+                      onClick={(e) => deleteSessionById(s.id, e)}
+                      className="hidden group-hover:flex items-center justify-center h-5 w-5 rounded hover:bg-destructive/20 hover:text-destructive text-muted-foreground shrink-0"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </button>
                 ))}
               </div>
-            </div>
+            ))}
           </div>
         )}
-
-        <div ref={bottomRef} />
       </div>
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
-        className="flex gap-2"
-      >
-        <input
-          type="text"
-          placeholder="Ask anything..."
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading}
-          className="flex-1 rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className={cn(
-            "flex items-center justify-center h-12 w-12 rounded-xl bg-primary text-primary-foreground transition-opacity",
-            (loading || !input.trim()) && "opacity-50 cursor-not-allowed"
+      {/* ── Main chat area ─────────────────────────────────────────────────── */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        <div className="flex flex-col h-full max-w-3xl mx-auto w-full p-6">
+          {/* Header */}
+          <div className="mb-4 flex items-start justify-between gap-4 shrink-0">
+            <div>
+              <h1 className="text-2xl font-bold">Chat</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Ask anything about your knowledge base.
+              </p>
+            </div>
+            <button
+              onClick={openSettings}
+              title="Model settings"
+              className="flex items-center gap-1.5 shrink-0 rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground hover:bg-muted transition-colors"
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span className="max-w-[180px] truncate">{modelChip}</span>
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 overflow-auto space-y-4 mb-4">
+            {messages.length === 0 && (
+              <div className="py-12 space-y-4">
+                {!isConfigured && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
+                    No model configured. Click the model button above to add your API key.
+                  </div>
+                )}
+                <p className="text-center text-muted-foreground text-sm">
+                  Try one of these prompts:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {SUGGESTED_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      onClick={() => sendMessage(prompt)}
+                      className="rounded-lg border border-border bg-card p-3 text-sm text-left hover:bg-accent transition-colors"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={cn("flex", msg.role === "user" ? "justify-end" : "justify-start")}
+              >
+                <div
+                  className={cn(
+                    "max-w-[80%] rounded-2xl px-4 py-3 text-sm",
+                    msg.role === "user"
+                      ? "bg-primary text-primary-foreground rounded-br-sm whitespace-pre-wrap"
+                      : "bg-card border border-border rounded-bl-sm"
+                  )}
+                >
+                  {msg.role === "user" ? (
+                    msg.content
+                  ) : (
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        h1: ({ children }) => <h1 className="text-lg font-bold mt-3 mb-2 pb-1 border-b border-border">{children}</h1>,
+                        h2: ({ children }) => <h2 className="text-base font-bold mt-3 mb-1.5">{children}</h2>,
+                        h3: ({ children }) => <h3 className="text-sm font-semibold mt-2 mb-1">{children}</h3>,
+                        p: ({ children }) => <p className="mb-3 leading-6 last:mb-0">{children}</p>,
+                        ul: ({ children }) => <ul className="mb-3 ml-4 list-disc space-y-1">{children}</ul>,
+                        ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal space-y-1">{children}</ol>,
+                        li: ({ children }) => <li className="leading-6">{children}</li>,
+                        pre: ({ children }) => <pre className="bg-muted rounded-lg p-3 my-2 overflow-x-auto text-xs font-mono">{children}</pre>,
+                        code: ({ className, children, ...props }) => {
+                          const isBlock = !!className;
+                          return isBlock
+                            ? <code className={cn("font-mono text-xs", className)} {...props}>{children}</code>
+                            : <code className="bg-muted px-1.5 py-0.5 rounded text-xs font-mono" {...props}>{children}</code>;
+                        },
+                        blockquote: ({ children }) => <blockquote className="border-l-2 border-primary/40 pl-3 my-2 text-muted-foreground italic">{children}</blockquote>,
+                        a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">{children}</a>,
+                        strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                        table: ({ children }) => <div className="overflow-x-auto my-2"><table className="w-full border-collapse text-xs">{children}</table></div>,
+                        th: ({ children }) => <th className="border border-border px-2 py-1 bg-muted font-medium text-left">{children}</th>,
+                        td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
+                      }}
+                    >
+                      {msg.content}
+                    </ReactMarkdown>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-card border border-border rounded-2xl rounded-bl-sm px-4 py-3">
+                  <div className="flex gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce"
+                        style={{ animationDelay: `${i * 150}ms` }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Context file chips */}
+          {contextItems.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2 shrink-0">
+              {contextItems.map((item) => (
+                <span
+                  key={item.id}
+                  className="flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-xs text-primary"
+                >
+                  <FileText className="h-3 w-3 shrink-0" />
+                  <span className="max-w-[160px] truncate">
+                    {item.title ?? item.ai_title ?? "Untitled"}
+                  </span>
+                  <button
+                    onClick={() => setContextItems((prev) => prev.filter((i) => i.id !== item.id))}
+                    className="ml-0.5 rounded-full hover:text-destructive transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+              <button
+                onClick={() => setContextItems([])}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-1"
+              >
+                Clear all
+              </button>
+            </div>
           )}
+
+          {/* Input */}
+          <form
+            onSubmit={(e) => { e.preventDefault(); sendMessage(input); }}
+            className="flex gap-2 shrink-0"
+          >
+            <button
+              type="button"
+              onClick={() => setShowFilePicker(true)}
+              title="Add file as context"
+              className={cn(
+                "relative flex items-center justify-center h-12 w-12 rounded-xl border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0",
+                contextItems.length > 0 && "border-primary/40 text-primary"
+              )}
+            >
+              <Paperclip className="h-4 w-4" />
+              {contextItems.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {contextItems.length}
+                </span>
+              )}
+            </button>
+
+            <input
+              type="text"
+              placeholder={isConfigured ? "Ask anything..." : "Configure a model to start…"}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={loading}
+              className="flex-1 rounded-xl border border-border bg-card px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={loading || !input.trim()}
+              className={cn(
+                "flex items-center justify-center h-12 w-12 rounded-xl bg-primary text-primary-foreground transition-opacity shrink-0",
+                (loading || !input.trim()) && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <Send className="h-4 w-4" />
+            </button>
+          </form>
+        </div>
+      </div>
+
+      {/* ── Settings modal ─────────────────────────────────────────────────── */}
+      {showSettings && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowSettings(false)}
         >
-          <Send className="h-4 w-4" />
-        </button>
-      </form>
+          <div
+            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold">Model Settings</h2>
+              <button onClick={() => setShowSettings(false)} className="rounded p-1 hover:bg-muted">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Provider */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Provider</label>
+              <select
+                value={draft.provider}
+                onChange={(e) => {
+                  const provider = e.target.value as ModelProvider;
+                  const defaultModel = PROVIDER_MODELS[provider][0] ?? "";
+                  setDraft((d) => ({ ...d, provider, model: defaultModel }));
+                }}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+              >
+                {(Object.keys(PROVIDER_LABELS) as ModelProvider[]).map((p) => (
+                  <option key={p} value={p}>
+                    {PROVIDER_LABELS[p]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* API key */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">
+                API Key / Token
+              </label>
+              <input
+                type="password"
+                placeholder={
+                  draft.provider === "github"
+                    ? "ghp_xxxx…"
+                    : draft.provider === "anthropic"
+                    ? "sk-ant-xxxx…"
+                    : draft.provider === "gemini"
+                    ? "AIza…"
+                    : "sk-xxxx…"
+                }
+                value={draft.apiKey}
+                onChange={(e) => setDraft((d) => ({ ...d, apiKey: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Stored only in your browser&rsquo;s localStorage.
+              </p>
+            </div>
+
+            {/* Model */}
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Model</label>
+              {PROVIDER_MODELS[draft.provider].length > 0 ? (
+                <select
+                  value={draft.model}
+                  onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                >
+                  {PROVIDER_MODELS[draft.provider].map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  placeholder="e.g. gpt-4o, llama3, mistral-7b"
+                  value={draft.model}
+                  onChange={(e) => setDraft((d) => ({ ...d, model: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-primary"
+                />
+              )}
+            </div>
+
+            {/* Custom base URL */}
+            {draft.provider === "custom" && (
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Base URL</label>
+                <input
+                  type="text"
+                  placeholder="https://your-endpoint.example.com/v1"
+                  value={draft.baseUrl}
+                  onChange={(e) => setDraft((d) => ({ ...d, baseUrl: e.target.value }))}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-mono outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            )}
+
+            {/* Provider hints */}
+            {draft.provider === "github" && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-muted/50 p-2 leading-relaxed">
+                GitHub Models uses your personal access token (PAT). Generate one at GitHub →
+                Settings → Developer settings → Personal access tokens.
+              </p>
+            )}
+            {draft.provider === "gemini" && (
+              <p className="text-xs text-muted-foreground rounded-lg bg-muted/50 p-2 leading-relaxed">
+                Get your Gemini API key at{" "}
+                <span className="font-mono">aistudio.google.com</span> → Get API key. Free tier
+                available.
+              </p>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setShowSettings(false)}
+                className="rounded-md px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveAndClose}
+                className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── File picker ───────────────────────────────────────────────────── */}
+      {showFilePicker && (
+        <ItemPickerDialog
+          open
+          title="Add file as context"
+          onPick={(item) => {
+            setContextItems((prev) =>
+              prev.some((i) => i.id === item.id) ? prev : [...prev, item]
+            );
+            setShowFilePicker(false);
+          }}
+          onClose={() => setShowFilePicker(false)}
+        />
+      )}
     </div>
   );
 }

@@ -27,6 +27,29 @@ async function apiFetch<T>(
   return res.json();
 }
 
+/** Multipart upload — does NOT set Content-Type so the browser adds the boundary. */
+async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = await getAccessToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_URL}${PREFIX}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Upload failed");
+  }
+  return res.json();
+}
+
+/** Absolute URL for an item's stored binary (used by the file viewer). */
+export function itemFileUrl(itemId: string): string {
+  return `${API_URL}${PREFIX}/items/${itemId}/file`;
+}
+
 // ── Items ──────────────────────────────────────────────────────────────────
 
 export type Item = {
@@ -37,6 +60,9 @@ export type Item = {
   title: string | null;
   content_type: string;
   source_url: string | null;
+  storage_key: string | null;
+  file_size: number | null;
+  mime_type: string | null;
   summary: string | null;
   ai_title: string | null;
   tags: string[];
@@ -91,8 +117,30 @@ export const itemsApi = {
     method: "POST",
     body: JSON.stringify(payload),
   }),
-  update: (id: string, data: Partial<{ title: string; folder_id: string; tags: string[]; is_starred: boolean }>) =>
-    apiFetch<Item>(`/items/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  upload: (file: File, folderId?: string, titleOverride?: string, tagsOverride?: string[]) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    if (folderId) fd.append("folder_id", folderId);
+    if (titleOverride) fd.append("title_override", titleOverride);
+    if (tagsOverride?.length) fd.append("tags_override", JSON.stringify(tagsOverride));
+    return apiUpload<{ item_id: string; status: string }>("/items/upload", fd);
+  },
+  update: (
+    id: string,
+    data: Partial<{ title: string; folder_id: string | null; tags: string[]; is_starred: boolean }>
+  ) => apiFetch<Item>(`/items/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Move is just an update of folder_id. null = uncategorised (root).
+  move: (id: string, folderId: string | null) =>
+    apiFetch<Item>(`/items/${id}`, { method: "PATCH", body: JSON.stringify({ folder_id: folderId }) }),
+  copy: (id: string, folderId: string | null) => {
+    const q = folderId ? `?folder_id=${folderId}` : "";
+    return apiFetch<Item>(`/items/${id}/copy${q}`, { method: "POST" });
+  },
+  link: (sourceId: string, targetId: string) =>
+    apiFetch<{ status: string }>(`/items/${sourceId}/link?target_id=${targetId}`, { method: "POST" }),
+  unlink: (sourceId: string, targetId: string) =>
+    apiFetch<void>(`/items/${sourceId}/link/${targetId}`, { method: "DELETE" }),
+  links: (id: string) => apiFetch<Item[]>(`/items/${id}/links`),
   delete: (id: string) => apiFetch<void>(`/items/${id}`, { method: "DELETE" }),
 };
 
@@ -117,8 +165,13 @@ export const foldersApi = {
   tree: () => apiFetch<Folder[]>("/folders"),
   create: (data: { name: string; parent_id?: string; emoji?: string; color?: string }) =>
     apiFetch<Folder>("/folders", { method: "POST", body: JSON.stringify(data) }),
-  update: (id: string, data: Partial<{ name: string; emoji: string; color: string }>) =>
-    apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  update: (
+    id: string,
+    data: Partial<{ name: string; emoji: string; color: string; parent_id: string | null }>
+  ) => apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  // Move a folder under a new parent. null = move to root.
+  move: (id: string, parentId: string | null) =>
+    apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify({ parent_id: parentId }) }),
   delete: (id: string) => apiFetch<void>(`/folders/${id}`, { method: "DELETE" }),
 };
 
@@ -186,4 +239,46 @@ export const graphApi = {
     if (params?.min_weight) qs.set("min_weight", String(params.min_weight));
     return apiFetch<GraphResponse>(`/graph?${qs}`);
   },
+};
+
+// ── Chat Sessions ──────────────────────────────────────────────────────────────
+
+export type ChatSessionMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+};
+
+export type ContextItemStub = {
+  id: string;
+  title: string | null;
+  ai_title: string | null;
+};
+
+export type ChatSessionData = {
+  id: string;
+  title: string | null;
+  messages: ChatSessionMessage[];
+  context_item_stubs: ContextItemStub[];
+  created_at: string;
+  updated_at: string;
+};
+
+export const chatSessionsApi = {
+  list: () => apiFetch<ChatSessionData[]>("/chat/sessions"),
+  upsert: (
+    id: string,
+    data: {
+      title?: string | null;
+      messages: Array<{ role: string; content: string }>;
+      context_item_stubs?: ContextItemStub[];
+    }
+  ) =>
+    apiFetch<ChatSessionData>(`/chat/sessions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) =>
+    apiFetch<void>(`/chat/sessions/${id}`, { method: "DELETE" }),
 };

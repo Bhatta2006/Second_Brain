@@ -58,12 +58,51 @@ async def _fetch_url_text(url: str) -> str:
         return ""
 
 
+def _extract_file_text(item: Item) -> str:
+    """Pull text out of an uploaded file so the classifier has something to work
+    with. PDFs go through pypdf; text-ish files are decoded directly; binary
+    media (images, audio, video) yield nothing — they're classified by filename."""
+    from app import storage
+
+    if not item.storage_key or not storage.file_exists(item.storage_key):
+        return ""
+    try:
+        raw = storage.read_file(item.storage_key)
+    except Exception as exc:
+        log.warning("Could not read file for %s: %s", item.id, exc)
+        return ""
+
+    if item.content_type == "pdf":
+        try:
+            import io
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(raw))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            return "\n".join(pages)[:MAX_TEXT_FOR_AI]
+        except Exception as exc:
+            log.warning("PDF extraction failed for %s: %s", item.id, exc)
+            return ""
+
+    if item.content_type in ("text", "doc"):
+        try:
+            return raw.decode("utf-8", errors="ignore")[:MAX_TEXT_FOR_AI]
+        except Exception:
+            return ""
+
+    # image / audio / video — no text layer
+    return ""
+
+
 def _pick_content(item: Item, fetched: str) -> str:
     """Choose the best text representation of an item for AI processing."""
     if item.raw_text:
         return item.raw_text[:MAX_TEXT_FOR_AI]
     if fetched:
         return fetched
+    extracted = _extract_file_text(item)
+    if extracted.strip():
+        return extracted
     if item.title:
         return item.title
     return ""
@@ -105,30 +144,37 @@ async def _process(item_id: str, user_id: str) -> None:
             await _trigger_sync(item_id, user_id)
             return
 
+        meta = item.metadata_ or {}
+        user_set_tags = bool(meta.get("user_set_tags"))
+
         classification = await classify_item(
             content_type=item.content_type,
             content_text=content,
+            skip_tags=user_set_tags,
         )
 
         summary = classification.get("summary") or ""
         if not summary:
             summary = await summarise(content)
 
+        final_tags = item.tags if user_set_tags else (classification.get("tags") or [])
+
         embedding = await embed_item({
             "title": classification.get("title") or item.title,
             "summary": summary,
             "raw_text": content,
-            "tags": classification.get("tags") or [],
+            "tags": final_tags,
         })
 
         confidence = float(classification.get("confidence") or 0.0)
+
         await db.execute(
             update(Item)
             .where(Item.id == item_id)
             .values(
                 ai_title=classification.get("title") or None,
                 summary=summary or None,
-                tags=classification.get("tags") or [],
+                tags=final_tags,
                 entities=classification.get("entities") or {},
                 confidence=confidence,
                 needs_review=confidence < 0.5,

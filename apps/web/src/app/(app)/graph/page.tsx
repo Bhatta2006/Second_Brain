@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useRef, useEffect, useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
-import { Search as SearchIcon, Maximize2 } from "lucide-react";
-import { graphApi } from "@/lib/api";
+import { Search as SearchIcon, Maximize2, Unlink } from "lucide-react";
+import { graphApi, itemsApi } from "@/lib/api";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -44,6 +44,8 @@ type SelectedNode = {
 };
 
 type SelectedEdge = {
+  sourceId: string;
+  targetId: string;
   sourceLabel: string;
   targetLabel: string;
   edges: Array<{ type: string; weight: number }>;
@@ -68,7 +70,6 @@ type GLink = {
   source: string | GNode;
   target: string | GNode;
   color: string;
-  width: number;
   edges: Array<{ type: string; weight: number }>;
 };
 
@@ -90,12 +91,22 @@ export default function GraphPage() {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [minWeight, setMinWeight] = useState(0.6);
   const [search, setSearch] = useState("");
+  const [enabledEdgeTypes, setEnabledEdgeTypes] = useState<Set<string>>(
+    () => new Set(Object.keys(EDGE_COLORS))
+  );
 
+  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery({
     queryKey: ["graph", minWeight],
     queryFn: () => graphApi.get({ min_weight: minWeight }),
     retry: 1,
   });
+
+  async function handleUnlink(edge: SelectedEdge) {
+    await itemsApi.unlink(edge.sourceId, edge.targetId);
+    setSelectedEdge(null);
+    queryClient.invalidateQueries({ queryKey: ["graph"] });
+  }
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -133,19 +144,21 @@ export default function GraphPage() {
         name: n.label,
         val: Math.max(1, Math.log(1 + n.view_count) * 3),
       })),
-      links: Array.from(pairMap.values()).map<GLink>((p) => {
-        const strongest = p.edges.reduce((a, b) => (b.weight > a.weight ? b : a), p.edges[0]);
-        const totalWeight = p.edges.reduce((s, e) => s + e.weight, 0);
-        return {
-          source: p.source,
-          target: p.target,
-          color: EDGE_COLORS[strongest.type] ?? "#888888",
-          width: Math.max(1.5, Math.min(6, totalWeight * 1.8)),
-          edges: p.edges,
-        };
-      }),
+      links: Array.from(pairMap.values())
+        .filter((p) => p.edges.some((e) => enabledEdgeTypes.has(e.type)))
+        .map<GLink>((p) => {
+          const visibleEdges = p.edges.filter((e) => enabledEdgeTypes.has(e.type));
+          const strongest = visibleEdges.reduce((a, b) => (b.weight > a.weight ? b : a), visibleEdges[0]);
+          return {
+            source: p.source,
+            target: p.target,
+            color: EDGE_COLORS[strongest.type] ?? "#888888",
+            width: 1.5,
+            edges: visibleEdges,
+          };
+        }),
     };
-  }, [data]);
+  }, [data, enabledEdgeTypes]);
 
   // Build a neighbour index for instant hover highlighting (O(1) lookup).
   const neighbours = useMemo(() => {
@@ -203,10 +216,12 @@ export default function GraphPage() {
 
   const handleLinkClick = useCallback((link: any) => {
     const l = link as GLink;
+    const sourceId = typeof l.source === "object" ? l.source.id : l.source;
+    const targetId = typeof l.target === "object" ? l.target.id : l.target;
     const sourceLabel = typeof l.source === "object" ? l.source.label : l.source;
     const targetLabel = typeof l.target === "object" ? l.target.label : l.target;
     setSelectedNode(null);
-    setSelectedEdge({ sourceLabel, targetLabel, edges: l.edges });
+    setSelectedEdge({ sourceId, targetId, sourceLabel, targetLabel, edges: l.edges });
   }, []);
 
   const handleNodeHover = useCallback((node: any) => {
@@ -271,13 +286,48 @@ export default function GraphPage() {
           Zoom to fit
         </button>
 
-        <div className="space-y-1">
-          <p className="text-xs font-semibold text-muted-foreground">Edge types</p>
-          {Object.entries(EDGE_COLORS).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="inline-block w-4 h-0.5 rounded" style={{ backgroundColor: color }} />
-              <span className="capitalize">{type.replace("_", " ")}</span>
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-muted-foreground">Edge types</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setEnabledEdgeTypes(new Set(Object.keys(EDGE_COLORS)))}
+                className="text-xs text-primary hover:underline"
+              >
+                All
+              </button>
+              <button
+                onClick={() => setEnabledEdgeTypes(new Set())}
+                className="text-xs text-muted-foreground hover:underline"
+              >
+                None
+              </button>
             </div>
+          </div>
+          {Object.entries(EDGE_COLORS).map(([type, color]) => (
+            <label
+              key={type}
+              className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer hover:text-foreground transition-colors"
+            >
+              <input
+                type="checkbox"
+                checked={enabledEdgeTypes.has(type)}
+                onChange={() =>
+                  setEnabledEdgeTypes((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(type)) next.delete(type);
+                    else next.add(type);
+                    return next;
+                  })
+                }
+                className="rounded accent-primary"
+              />
+              <span
+                className="inline-block w-4 h-0.5 rounded shrink-0"
+                style={{ backgroundColor: color }}
+              />
+              <span className="capitalize">{type.replace(/_/g, " ")}</span>
+            </label>
           ))}
         </div>
       </div>
@@ -346,6 +396,16 @@ export default function GraphPage() {
                 </div>
               ))}
           </div>
+
+          {selectedEdge.edges.some((e) => e.type === "user_link") && (
+            <button
+              onClick={() => handleUnlink(selectedEdge)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-md border border-red-200 bg-red-50 py-1.5 text-xs text-red-600 hover:bg-red-100 transition-colors"
+            >
+              <Unlink className="h-3.5 w-3.5" />
+              Remove manual link
+            </button>
+          )}
         </div>
       )}
 
@@ -442,7 +502,7 @@ export default function GraphPage() {
           const s = typeof l.source === "string" ? l.source : l.source.id;
           const t = typeof l.target === "string" ? l.target : l.target.id;
           const emphasised = hoveredNodeId === s || hoveredNodeId === t;
-          return emphasised ? l.width + 1 : l.width;
+          return emphasised ? 2.5 : 1.5;
         }}
         linkLabel={(link: any) => {
           const l = link as GLink;

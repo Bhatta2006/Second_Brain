@@ -38,12 +38,26 @@ Given a piece of content, return a JSON object with exactly these fields:
 
 Return only valid JSON. No markdown fences. No extra text."""
 
+CLASSIFICATION_SYSTEM_NO_TAGS = """You are an expert personal knowledge organiser.
+Given a piece of content, return a JSON object with exactly these fields:
+- suggested_folder: array of folder path segments (e.g. ["Learning", "Programming"])
+- confidence: float 0–1
+- title: concise title (max 60 chars)
+- summary: 2–3 sentence plain-English summary
+- tags: [] (the user has already provided tags — leave this empty array as-is)
+- entities: { "people": [], "places": [], "organisations": [], "concepts": [] }
+- content_type_label: human-readable type (e.g. "Research Article")
+
+Return only valid JSON. No markdown fences. No extra text."""
+
 
 async def classify_item(
     content_type: str,
     content_text: str,
     folder_tree_json: str = "[]",
+    skip_tags: bool = False,
 ) -> dict:
+    system_prompt = CLASSIFICATION_SYSTEM_NO_TAGS if skip_tags else CLASSIFICATION_SYSTEM
     user_prompt = (
         f"User's existing folder tree: {folder_tree_json}\n"
         f"Content type: {content_type}\n"
@@ -54,7 +68,7 @@ async def classify_item(
             response = await client.complete(
                 model=settings.classification_model,
                 messages=[
-                    SystemMessage(content=CLASSIFICATION_SYSTEM),
+                    SystemMessage(content=system_prompt),
                     UserMessage(content=user_prompt),
                 ],
                 temperature=0.2,
