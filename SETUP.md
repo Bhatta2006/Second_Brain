@@ -72,42 +72,60 @@ cd Second_Brain
 
 ---
 
-## Step 2 — Get the .env file
+## Step 2 — Create your .env file
 
-The `.env` file contains real API keys and is **never committed to git**. Ask the project owner (Hemanth) for it and place it at the **root of the repo** (same level as `docker-compose.yml`).
+Create a file named `.env` at the **root of the repo** (same level as `docker-compose.yml`). Copy the block below and fill in the values as described.
 
-It should look like this (with real values filled in):
 ```
+# ── Local services (same for everyone, no changes needed) ──────────────────
 DATABASE_URL=postgresql+asyncpg://secondbrain:secondbrain@localhost:5432/secondbrain
 DATABASE_URL_SYNC=postgresql://secondbrain:secondbrain@localhost:5432/secondbrain
 REDIS_URL=redis://localhost:6379/0
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USER=neo4j
 NEO4J_PASSWORD=secondbrain
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-SUPABASE_JWT_SECRET=...
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=ap-south-1
-S3_BUCKET=...
-GITHUB_TOKEN=github_pat_...
-GITHUB_MODELS_ENDPOINT=https://models.github.ai/inference
-EMBEDDING_MODEL=openai/text-embedding-3-large
-CLASSIFICATION_MODEL=openai/gpt-4o
-SUMMARISATION_MODEL=openai/gpt-4o-mini
 USE_NEO4J_GRAPH=true
 API_ENV=development
 API_HOST=0.0.0.0
 API_PORT=8000
 CORS_ORIGINS=http://localhost:3000
 NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+GITHUB_MODELS_ENDPOINT=https://models.github.ai/inference
+EMBEDDING_MODEL=openai/text-embedding-3-large
+CLASSIFICATION_MODEL=openai/gpt-4o
+SUMMARISATION_MODEL=openai/gpt-4o-mini
+
+# ── Get these from the project owner (Hemanth) ─────────────────────────────
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+SUPABASE_JWT_SECRET=
+AWS_ACCESS_KEY_ID=
+AWS_SECRET_ACCESS_KEY=
+AWS_REGION=ap-south-1
+S3_BUCKET=
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+# ── Generate your own GitHub token (see instructions below) ────────────────
+GITHUB_TOKEN=
 ```
 
 > **Do not commit this file.** It is already in `.gitignore`.
+
+### Getting the Supabase + AWS values
+Ask Hemanth to share these values with you privately (e.g. WhatsApp/DM). They are the same for everyone on the team since you share one Supabase project.
+
+### Generating your own GITHUB_TOKEN
+Each developer needs their own GitHub Personal Access Token — it is tied to your GitHub account and cannot be shared.
+
+1. Go to https://github.com/settings/tokens?type=beta (fine-grained tokens)
+2. Click **Generate new token**
+3. Give it a name like `secondbrain-models`
+4. Set expiration to 90 days (or longer)
+5. Under **Permissions → Account permissions**, find **Models** and set it to **Read-only**
+6. Click **Generate token** and copy the value immediately
+7. Paste it as `GITHUB_TOKEN=github_pat_xxxx...` in your `.env`
 
 ---
 
