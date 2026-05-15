@@ -141,14 +141,18 @@ This installs all Node packages for the entire monorepo at once.
 
 ---
 
-## Step 4 — Set up Python environment for the API
+## Step 4 — Python virtual environment (optional)
+
+> **Skip this step if you are using Docker (Step 5).** Docker runs Python inside the container — you do not need a local venv.
+>
+> Only set this up if you want to run the API directly on your machine without Docker (e.g. for faster iteration or debugging).
 
 ```bash
 cd apps/api
 python -m venv .venv
 ```
 
-Activate the virtual environment:
+Activate:
 
 **Windows (PowerShell):**
 ```powershell
@@ -165,17 +169,11 @@ Activate the virtual environment:
 source .venv/bin/activate
 ```
 
-Install Python dependencies:
+Install dependencies:
 ```bash
 pip install -r requirements.txt
-```
-
-Go back to the repo root when done:
-```bash
 cd ../..
 ```
-
-> You only need to activate the venv if you want to run the API directly (without Docker). For the Docker path in Step 5, you can skip activating it.
 
 ---
 
