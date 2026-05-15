@@ -1,6 +1,6 @@
 # SecondBrain — Local Development Setup
 
-Complete guide to get the project running on your machine from scratch. No external reference needed.
+Complete guide to get the project running on your machine from scratch. Follow every step in order. Do not skip steps.
 
 ---
 
@@ -14,52 +14,37 @@ Complete guide to get the project running on your machine from scratch. No exter
 | Graph DB | Neo4j |
 | Primary DB | PostgreSQL + pgvector |
 | AI | GitHub Models API (GPT-4o, embeddings) |
-| Auth + Storage | Supabase (external — shared project) |
+| Auth + Storage | Supabase (shared external project) |
 
-Everything except Supabase runs locally inside Docker. You do **not** need to create your own Supabase project — you'll get the keys from the project owner.
+Everything except Supabase runs locally inside Docker. You do **not** need to create your own Supabase project.
 
 ---
 
 ## Prerequisites
 
-Install these before anything else.
+Install all of these before doing anything else.
 
 ### 1. Git
 - **Windows**: Download from https://git-scm.com/download/win — use all defaults
 - **macOS**: Run `xcode-select --install` in Terminal
-- **Linux (Ubuntu/Debian)**: `sudo apt install git`
+- **Linux**: `sudo apt install git`
 
 Verify: `git --version`
 
 ### 2. Docker Desktop
-Downloads:
-- **Windows/macOS**: https://www.docker.com/products/docker-desktop/
+- **Windows / macOS**: https://www.docker.com/products/docker-desktop/
 - **Linux**: https://docs.docker.com/engine/install/
 
-> **Windows users**: During install, enable "Use WSL 2 instead of Hyper-V" when prompted. After install, open Docker Desktop and wait until the whale icon in the taskbar shows "Docker Desktop is running" before proceeding.
+> **Windows users**: During install, enable "Use WSL 2 instead of Hyper-V" when prompted. After install, open Docker Desktop and wait until the whale icon in the taskbar says "Docker Desktop is running" before continuing.
 
 Verify: `docker --version` and `docker compose version`
 
 ### 3. Node.js 22
-- Download the LTS installer from https://nodejs.org (pick v22.x)
-- Use all defaults
+Download the v22.x LTS installer from https://nodejs.org — use all defaults.
 
 Verify: `node --version` (should show v22.x.x)
 
-### 4. pnpm 9
-After Node is installed, run:
-```bash
-npm install -g pnpm@9
-```
-
-Verify: `pnpm --version` (should show 9.x.x)
-
-### 5. Python 3.12
-- **Windows/macOS**: Download from https://www.python.org/downloads/ — pick the 3.12.x installer
-  - **Windows**: Check "Add Python to PATH" during install
-- **Linux**: `sudo apt install python3.12 python3.12-venv python3-pip`
-
-Verify: `python --version` or `python3 --version` (should show 3.12.x)
+> **Do NOT install pnpm** — it is not needed. Docker handles all package installation internally.
 
 ---
 
@@ -70,14 +55,18 @@ git clone https://github.com/Bhatta2006/Second_Brain.git
 cd Second_Brain
 ```
 
+All remaining commands must be run from inside the `Second_Brain` folder.
+
 ---
 
 ## Step 2 — Create your .env file
 
-Create a file named `.env` at the **root of the repo** (same level as `docker-compose.yml`). Copy the block below and fill in the values as described.
+Create a file named exactly `.env` (no other extension) at the **root of the repo** — the same folder that contains `docker-compose.yml`.
+
+Copy the entire block below into it and fill in the values:
 
 ```
-# ── Local services (same for everyone, no changes needed) ──────────────────
+# ── Local services — same for everyone, do not change these ────────────────
 DATABASE_URL=postgresql+asyncpg://secondbrain:secondbrain@localhost:5432/secondbrain
 DATABASE_URL_SYNC=postgresql://secondbrain:secondbrain@localhost:5432/secondbrain
 REDIS_URL=redis://localhost:6379/0
@@ -95,7 +84,7 @@ EMBEDDING_MODEL=openai/text-embedding-3-large
 CLASSIFICATION_MODEL=openai/gpt-4o
 SUMMARISATION_MODEL=openai/gpt-4o-mini
 
-# ── Get these from the project owner (Hemanth) ─────────────────────────────
+# ── Get these from Hemanth (same for all team members) ─────────────────────
 SUPABASE_URL=
 SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -107,206 +96,179 @@ S3_BUCKET=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 
-# ── Generate your own GitHub token (see instructions below) ────────────────
+# ── Generate your own (personal, cannot be shared) ──────────────────────────
 GITHUB_TOKEN=
 ```
 
-> **Do not commit this file.** It is already in `.gitignore`.
+> **Never commit this file.** It is already in `.gitignore`.
 
-### Getting the Supabase + AWS values
-Ask Hemanth to share these values with you privately (e.g. WhatsApp/DM). They are the same for everyone on the team since you share one Supabase project.
+### How to get the Supabase + AWS values
+Ask Hemanth to share them privately (WhatsApp/DM). They are identical for all team members.
 
-### Generating your own GITHUB_TOKEN
-Each developer needs their own GitHub Personal Access Token — it is tied to your GitHub account and cannot be shared.
+### How to generate your GITHUB_TOKEN
+Each person needs their own — it is tied to your GitHub account.
 
-1. Go to https://github.com/settings/tokens?type=beta (fine-grained tokens)
+1. Go to https://github.com/settings/tokens?type=beta
 2. Click **Generate new token**
-3. Give it a name like `secondbrain-models`
-4. Set expiration to 90 days (or longer)
-5. Under **Permissions → Account permissions**, find **Models** and set it to **Read-only**
-6. Click **Generate token** and copy the value immediately
-7. Paste it as `GITHUB_TOKEN=github_pat_xxxx...` in your `.env`
+3. Name it `secondbrain-models`, set expiration to 90 days
+4. Under **Permissions → Account permissions**, set **Models** to **Read-only**
+5. Click **Generate token**, copy it immediately
+6. Paste it as `GITHUB_TOKEN=github_pat_xxxx...` in your `.env`
 
 ---
 
-## Step 3 — Install frontend dependencies
+## Step 3 — Build and start everything
 
-Run this from the repo root:
-
-```bash
-pnpm install
-```
-
-This installs all Node packages for the entire monorepo at once.
-
----
-
-## Step 4 — Python virtual environment (optional)
-
-> **Skip this step if you are using Docker (Step 5).** Docker runs Python inside the container — you do not need a local venv.
->
-> Only set this up if you want to run the API directly on your machine without Docker (e.g. for faster iteration or debugging).
+Make sure Docker Desktop is open and running, then run:
 
 ```bash
-cd apps/api
-python -m venv .venv
+docker compose build --no-cache web
+docker compose up
 ```
 
-Activate:
+> Run these one at a time — wait for the first to finish before running the second.
 
-**Windows (PowerShell):**
-```powershell
-.venv\Scripts\Activate.ps1
+The first build takes **5–10 minutes**. You'll see a lot of output. It is done when you see:
+
+```
+secondbrain-web  |  ✓ Ready in 73ms
+secondbrain-api  | INFO:     Application startup complete.
+secondbrain-worker | celery@... ready.
 ```
 
-**Windows (Command Prompt):**
-```cmd
-.venv\Scripts\activate.bat
-```
-
-**macOS / Linux:**
-```bash
-source .venv/bin/activate
-```
-
-Install dependencies:
-```bash
-pip install -r requirements.txt
-cd ../..
-```
-
----
-
-## Step 5 — Start all services with Docker
-
-Make sure Docker Desktop is running, then from the repo root:
-
-```bash
-docker compose up --build
-```
-
-First run takes 5–10 minutes to build images and pull dependencies. Subsequent starts are fast.
-
-You'll know it's ready when you see output like:
-```
-secondbrain-api    | INFO:     Application startup complete.
-secondbrain-worker | ready.
-secondbrain-web    | ▲ Next.js 14.2.18
-secondbrain-web    | - Local: http://localhost:3000
-```
-
-### What's running:
+### What's running once it's up:
 
 | Service | URL |
 |---|---|
-| Frontend (Next.js) | http://localhost:3000 |
+| Frontend | http://localhost:3000 |
 | Backend API | http://localhost:8000 |
-| API docs (Swagger) | http://localhost:8000/docs |
+| API health check | http://localhost:8000/health |
 | Neo4j browser | http://localhost:7474 |
-| PostgreSQL | localhost:5432 |
-| Redis | localhost:6379 |
 
 ---
 
-## Step 6 — Run database migrations
+## Step 4 — Set up the database
 
-Open a new terminal (keep Docker running), navigate to the repo, and run:
+Open a **new terminal window** (keep the Docker terminal running), go to the repo folder, and run:
 
 ```bash
 docker compose exec api alembic upgrade head
 ```
 
-This applies all database schema migrations. You only need to run this once (and again whenever new migrations are added).
+**If you get `Can't locate revision identified by '...'`**, run these instead:
+
+```bash
+docker compose exec postgres psql -U secondbrain -d secondbrain -c "DELETE FROM alembic_version;"
+docker compose exec api alembic upgrade head
+```
+
+**If you get `relation "users" already exists`**, the tables already exist. Just sync alembic's state:
+
+```bash
+docker compose exec api alembic stamp 002
+```
+
+You only need to run this step once on first setup.
 
 ---
 
-## Verify everything works
+## Step 5 — Open the app
 
-1. Open http://localhost:3000 — you should see the SecondBrain login page
-2. Open http://localhost:8000/health — should return `{"status":"ok","database":"connected"}`
-3. Log in with your Supabase account (ask the project owner to invite you to the Supabase project, or create an account via the app's sign-up page)
+Go to http://localhost:3000/login in your browser. You should see the SecondBrain login page.
+
+Sign up or log in using your email. Use the same Supabase project as the team — your account will be created automatically on first login.
 
 ---
 
 ## Daily workflow
 
-### Start the project
+### Start
 ```bash
 docker compose up
 ```
-(omit `--build` after the first time unless you changed a Dockerfile or `requirements.txt`)
 
-### Stop the project
+### Stop
+Press `Ctrl+C` in the terminal where Docker is running, then:
 ```bash
 docker compose down
 ```
 
 ### View logs for a specific service
 ```bash
-docker compose logs -f api       # API logs
-docker compose logs -f worker    # Celery worker logs
-docker compose logs -f web       # Next.js logs
+docker compose logs -f web      # frontend
+docker compose logs -f api      # backend
+docker compose logs -f worker   # celery
 ```
 
-### Restart a single service (e.g. after changing Python code)
+### After pulling new code from git
+If someone changed the Dockerfile or `requirements.txt`:
 ```bash
-docker compose restart api
+git pull
+docker compose build --no-cache web
+docker compose up
 ```
 
-> The API has hot-reload enabled (`--reload`), so most Python changes apply automatically without a restart. Next.js also hot-reloads automatically.
-
----
-
-## Making code changes
-
-### Frontend (Next.js)
-- Files are in `apps/web/src/`
-- Changes are reflected immediately in the browser (hot reload)
-- If you add a new npm package: `pnpm --filter @secondbrain/web add <package-name>`, then restart the `web` container
-
-### Backend (FastAPI)
-- Files are in `apps/api/app/`
-- Changes are reflected automatically (uvicorn `--reload` is on)
-- If you add a new Python package: add it to `apps/api/requirements.txt`, then run `docker compose up --build api`
-
-### New database migration
+If only source code changed (no Dockerfile changes):
 ```bash
-docker compose exec api alembic revision --autogenerate -m "describe your change"
-docker compose exec api alembic upgrade head
+git pull
+docker compose up
 ```
 
 ---
 
 ## Troubleshooting
 
-### `docker compose up` fails with "port already in use"
-Another service on your machine is using port 5432, 6379, 7474, 7687, 8000, or 3000. Stop the conflicting service, or temporarily edit the port mapping in `docker-compose.yml` (left side is host port).
-
-### Windows: `Activate.ps1 cannot be loaded` error
-Run this once in PowerShell as Administrator:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+### White screen at localhost:3000
+The Supabase URL is not baked into the build. Make sure `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are filled in your `.env`, then rebuild:
+```bash
+docker compose build --no-cache web
+docker compose up
 ```
 
-### `pnpm install` fails with lockfile error
+### `docker compose up` fails — "port already in use"
+Something on your machine is using one of these ports: 3000, 5432, 6379, 7474, 7687, 8000.
+- On Windows: open Task Manager → find and end the conflicting process
+- Or change the left side of the port mapping in `docker-compose.yml` (e.g. `"3001:3000"`)
+
+### `Cannot find module '/app/node_modules/next/dist/bin/next'`
+Rebuild with no cache:
 ```bash
-pnpm install --no-frozen-lockfile
+docker compose build --no-cache web
+docker compose up
+```
+
+### `Cannot find module '/app/pnpm'`
+The compose file is using an old cached image. Pull latest code and rebuild:
+```bash
+git pull
+docker compose build --no-cache web
+docker compose up
+```
+
+### `alembic upgrade head` — `Can't locate revision identified by '...'`
+```bash
+docker compose exec postgres psql -U secondbrain -d secondbrain -c "DELETE FROM alembic_version;"
+docker compose exec api alembic upgrade head
+```
+
+### `alembic upgrade head` — `relation "users" already exists`
+Tables already exist from a previous run. Just sync the state:
+```bash
+docker compose exec api alembic stamp 002
 ```
 
 ### API container keeps restarting
-Check logs: `docker compose logs api`. Usually means a missing or wrong value in `.env`. Double-check the Supabase and GitHub token values.
+Check logs: `docker compose logs api`
+Usually means a missing or wrong value in `.env`. Double-check your Supabase keys and GitHub token.
 
-### Neo4j browser at localhost:7474 asks for login
+### Neo4j browser at localhost:7474 asks for a password
 Username: `neo4j` — Password: `secondbrain`
 
-### `alembic upgrade head` fails with "relation already exists"
-The database already has tables (from a previous run). This is fine — run:
-```bash
-docker compose exec api alembic stamp head
-```
+### Windows: `Activate.ps1 cannot be loaded`
+You don't need a Python venv — Docker handles Python. If you see this error, you accidentally activated one. Run `deactivate` and continue with Docker.
 
-### Frontend shows "CORS error" or "Network Error"
-Make sure `CORS_ORIGINS=http://localhost:3000` is in your `.env` and the API is running at port 8000.
+### `pnpm` command not found
+You don't need pnpm installed on your machine — Docker handles it internally. Ignore any pnpm-related instructions if you see them elsewhere.
 
 ---
 
@@ -317,23 +279,22 @@ Second_Brain/
 ├── apps/
 │   ├── api/                  # FastAPI backend
 │   │   ├── app/
-│   │   │   ├── main.py       # FastAPI app entry
+│   │   │   ├── main.py       # App entry point
 │   │   │   ├── config.py     # All env var settings
 │   │   │   ├── routers/      # API endpoints
-│   │   │   ├── models/       # SQLAlchemy DB models
-│   │   │   ├── tasks/        # Celery background tasks
+│   │   │   ├── models/       # Database models
+│   │   │   ├── tasks/        # Celery background jobs
 │   │   │   ├── ai/           # GitHub Models integration
 │   │   │   └── graph/        # Neo4j graph logic
-│   │   ├── alembic/          # DB migrations
+│   │   ├── alembic/          # Database migrations
 │   │   └── requirements.txt
 │   └── web/                  # Next.js frontend
 │       └── src/
-│           ├── app/          # Pages (App Router)
+│           ├── app/          # Pages
 │           ├── components/   # React components
-│           ├── lib/          # API client, Supabase client
+│           ├── lib/          # API client, Supabase
 │           └── stores/       # Zustand state
-├── infra/db/init.sql         # DB extensions setup
-├── docker-compose.yml        # Local dev orchestration
-├── .env                      # Your secrets (never commit)
-└── .env.example              # Template (safe to commit)
+├── docker-compose.yml        # Runs all services locally
+├── .env                      # Your secrets — never commit
+└── .env.example              # Template
 ```
