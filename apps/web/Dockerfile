@@ -1,11 +1,7 @@
-FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-
-# Build
-FROM base AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package.json ./
-RUN pnpm install --no-frozen-lockfile
+RUN npm install --legacy-peer-deps
 COPY . .
 
 ARG NEXT_PUBLIC_API_URL
@@ -16,10 +12,10 @@ ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN pnpm build
+RUN npm run build
 
 # Production runner
-FROM base AS runner
+FROM node:22-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
