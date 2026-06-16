@@ -5,7 +5,7 @@ RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 FROM base AS deps
 WORKDIR /app
 COPY package.json ./
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm config set node-linker hoisted && pnpm install --no-frozen-lockfile
 
 # Build
 FROM base AS builder
@@ -22,6 +22,17 @@ ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
 ENV NEXT_TELEMETRY_DISABLED=1
 
 RUN pnpm build
+
+# Development runner (with node_modules)
+FROM base AS dev
+WORKDIR /app
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=deps /app/node_modules ./node_modules
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+CMD ["pnpm", "dev"]
 
 # Production runner
 FROM base AS runner

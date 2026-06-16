@@ -59,9 +59,9 @@ async def _fetch_url_text(url: str) -> str:
 
 
 def _extract_file_text(item: Item) -> str:
-    """Pull text out of an uploaded file so the classifier has something to work
-    with. PDFs go through pypdf; text-ish files are decoded directly; binary
-    media (images, audio, video) yield nothing — they're classified by filename."""
+    """Pull text out of an uploaded file for the classifier.
+    PDF/DOCX/XLSX/PPTX go through their respective libraries; text files are
+    decoded directly; images/audio/video yield empty string (handled separately)."""
     from app import storage
 
     if not item.storage_key or not storage.file_exists(item.storage_key):
@@ -76,7 +76,6 @@ def _extract_file_text(item: Item) -> str:
         try:
             import io
             from pypdf import PdfReader
-
             reader = PdfReader(io.BytesIO(raw))
             pages = [page.extract_text() or "" for page in reader.pages]
             return "\n".join(pages)[:MAX_TEXT_FOR_AI]
@@ -84,22 +83,135 @@ def _extract_file_text(item: Item) -> str:
             log.warning("PDF extraction failed for %s: %s", item.id, exc)
             return ""
 
-    if item.content_type in ("text", "doc"):
+    if item.content_type == "doc":
+        filename = (item.metadata_ or {}).get("filename", "")
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+        if ext in ("docx",):
+            try:
+                import io
+                from docx import Document
+                doc = Document(io.BytesIO(raw))
+                text = "\n".join(p.text for p in doc.paragraphs)
+                return text[:MAX_TEXT_FOR_AI]
+            except Exception as exc:
+                log.warning("DOCX extraction failed for %s: %s", item.id, exc)
+
+        if ext in ("xlsx", "xls"):
+            try:
+                import io, openpyxl
+                wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+                lines = []
+                for ws in wb.worksheets:
+                    for row in ws.iter_rows(values_only=True):
+                        cell_vals = [str(c) for c in row if c is not None]
+                        if cell_vals:
+                            lines.append("\t".join(cell_vals))
+                return "\n".join(lines)[:MAX_TEXT_FOR_AI]
+            except Exception as exc:
+                log.warning("XLSX extraction failed for %s: %s", item.id, exc)
+
+        if ext in ("pptx",):
+            try:
+                import io
+                from pptx import Presentation
+                prs = Presentation(io.BytesIO(raw))
+                lines = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text:
+                            lines.append(shape.text)
+                return "\n".join(lines)[:MAX_TEXT_FOR_AI]
+            except Exception as exc:
+                log.warning("PPTX extraction failed for %s: %s", item.id, exc)
+
+        # fallback: try raw UTF-8 decode (CSV, plain text uploaded as doc)
         try:
             return raw.decode("utf-8", errors="ignore")[:MAX_TEXT_FOR_AI]
         except Exception:
             return ""
 
-    # image / audio / video — no text layer
+    if item.content_type in ("text",):
+        try:
+            return raw.decode("utf-8", errors="ignore")[:MAX_TEXT_FOR_AI]
+        except Exception:
+            return ""
+
+    # image / audio / video — no text layer extracted here
     return ""
 
 
-def _pick_content(item: Item, fetched: str) -> str:
+async def _describe_image(item: Item) -> str:
+    """Send image to GitHub Models vision to get a text description."""
+    from app import storage
+    import base64
+
+    if not item.storage_key or not storage.file_exists(item.storage_key):
+        return ""
+    try:
+        raw = storage.read_file(item.storage_key)
+    except Exception as exc:
+        log.warning("Cannot read image for %s: %s", item.id, exc)
+        return ""
+
+    filename = (item.metadata_ or {}).get("filename", "image.jpg")
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    mime_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                "webp": "image/webp", "gif": "image/gif"}
+    mime = mime_map.get(ext, "image/jpeg")
+
+    if len(raw) > 5 * 1024 * 1024:
+        log.info("Image %s is >5MB, skipping vision description", item.id)
+        return ""
+
+    b64 = base64.b64encode(raw).decode()
+    data_url = f"data:{mime};base64,{b64}"
+
+    from app.config import settings
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            res = await client.post(
+                f"{settings.github_models_endpoint}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.github_token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "openai/gpt-4o",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "Describe this image in detail. Include: what you see, "
+                                        "any text visible, objects, scenes, colours, people, places. "
+                                        "Also suggest 3-6 relevant tags. Be concise (under 200 words)."
+                                    ),
+                                },
+                                {"type": "image_url", "image_url": {"url": data_url}},
+                            ],
+                        }
+                    ],
+                    "max_tokens": 400,
+                },
+            )
+            res.raise_for_status()
+            return res.json()["choices"][0]["message"]["content"]
+    except Exception as exc:
+        log.warning("Vision description failed for %s: %s", item.id, exc)
+        return ""
+
+
+def _pick_content(item: Item, fetched: str, image_desc: str = "") -> str:
     """Choose the best text representation of an item for AI processing."""
     if item.raw_text:
         return item.raw_text[:MAX_TEXT_FOR_AI]
     if fetched:
         return fetched
+    if image_desc:
+        return image_desc
     extracted = _extract_file_text(item)
     if extracted.strip():
         return extracted
@@ -138,7 +250,11 @@ async def _process(item_id: str, user_id: str) -> None:
         if item.content_type == "url" and item.source_url:
             fetched = await _fetch_url_text(item.source_url)
 
-        content = _pick_content(item, fetched)
+        image_desc = ""
+        if item.content_type == "image":
+            image_desc = await _describe_image(item)
+
+        content = _pick_content(item, fetched, image_desc)
         if not content.strip():
             log.info("process_item: %s has no content, skipping AI", item_id)
             await _trigger_sync(item_id, user_id)

@@ -1,8 +1,9 @@
 import uuid
-from fastapi import Depends, Security
+from fastapi import Depends, Security, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.database import get_db
 from app.middleware.auth import decode_supabase_jwt
 from app.models.user import User
@@ -22,15 +23,23 @@ async def get_current_user(
     payload = await decode_supabase_jwt(credentials.credentials)
     sub = payload.get("sub")
     if not sub:
-        from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Token missing subject claim")
 
-    user_id = uuid.UUID(sub)
+    try:
+        user_id = uuid.UUID(sub)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid subject claim")
 
     result = await db.execute(select(User).where(User.id == user_id))
     if result.scalar_one_or_none() is None:
         email = payload.get("email") or f"{sub}@unknown.local"
-        db.add(User(id=user_id, email=email))
+        # Atomic upsert — avoids an IntegrityError race when two concurrent
+        # first-login requests for the same new user both try to insert.
+        await db.execute(
+            pg_insert(User)
+            .values(id=user_id, email=email)
+            .on_conflict_do_nothing(index_elements=["id"])
+        )
         await db.commit()
 
     return user_id

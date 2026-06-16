@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { EASE_OUT } from "@/components/ui/motion";
 
 export type MenuItem = {
   label: string;
@@ -45,10 +47,13 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
   const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : y) - items.length * 36 - 16);
 
   return (
-    <div
+    <motion.div
       ref={ref}
-      className="fixed z-[60] min-w-[180px] rounded-lg border border-border bg-card py-1 shadow-xl"
-      style={{ left, top }}
+      initial={{ opacity: 0, scale: 0.94, y: -4 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      transition={{ duration: 0.16, ease: EASE_OUT }}
+      style={{ left, top, transformOrigin: "top left" }}
+      className="fixed z-[60] min-w-[184px] overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-lift"
     >
       {items.map((item, i) => (
         <div key={item.label}>
@@ -59,17 +64,17 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
               onClose();
             }}
             className={cn(
-              "flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors",
+              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors",
               item.destructive
-                ? "text-red-600 hover:bg-red-50"
-                : "hover:bg-muted"
+                ? "text-destructive hover:bg-destructive/10"
+                : "text-foreground hover:bg-accent"
             )}
           >
-            {item.icon && <item.icon className="h-4 w-4 shrink-0" />}
-            {item.label}
+            {item.icon && <item.icon className="h-4 w-4 shrink-0 opacity-80" />}
+            <span className="truncate">{item.label}</span>
           </button>
         </div>
       ))}
-    </div>
+    </motion.div>
   );
 }

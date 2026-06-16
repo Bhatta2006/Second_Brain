@@ -65,7 +65,7 @@ function MarkdownBody({ content }: { content: string }) {
             <li className="leading-7">{children}</li>
           ),
           blockquote: ({ children }) => (
-            <blockquote className="border-l-4 border-primary/40 pl-4 my-4 text-muted-foreground italic">
+            <blockquote className="border-l-4 border-brand/50 pl-4 my-4 text-muted-foreground italic">
               {children}
             </blockquote>
           ),
@@ -93,7 +93,7 @@ function MarkdownBody({ content }: { content: string }) {
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-primary underline underline-offset-2 hover:no-underline"
+              className="text-brand underline underline-offset-2 hover:no-underline"
             >
               {children}
             </a>
@@ -192,16 +192,19 @@ export function FileContent({ item }: { item: Item }) {
 
   if (state.kind === "loading") {
     return (
-      <div className="flex h-64 items-center justify-center text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin" />
+      <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground animate-fade-in">
+        <Loader2 className="h-6 w-6 animate-spin text-brand" />
+        <p className="text-xs font-medium">Loading file…</p>
       </div>
     );
   }
 
   if (state.kind === "error") {
     return (
-      <div className="flex h-64 flex-col items-center justify-center gap-2 text-muted-foreground">
-        <FileQuestion className="h-8 w-8" />
+      <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground animate-fade-in">
+        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-destructive/10">
+          <FileQuestion className="h-6 w-6 text-destructive" />
+        </div>
         <p className="text-sm">{state.message}</p>
       </div>
     );
@@ -213,7 +216,7 @@ export function FileContent({ item }: { item: Item }) {
 
   if (state.kind === "text") {
     return (
-      <pre className="whitespace-pre-wrap break-words rounded-md bg-muted p-4 text-xs leading-relaxed max-w-3xl mx-auto font-mono">
+      <pre className="mx-auto max-w-3xl whitespace-pre-wrap break-words rounded-xl border border-border bg-muted/60 p-4 font-mono text-xs leading-relaxed">
         {state.content}
       </pre>
     );
@@ -227,7 +230,7 @@ export function FileContent({ item }: { item: Item }) {
             href={item.source_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+            className="flex items-center gap-1.5 text-sm text-brand hover:underline"
           >
             <ExternalLink className="h-4 w-4 shrink-0" />
             {item.source_url}
@@ -281,13 +284,15 @@ export function FileContent({ item }: { item: Item }) {
     );
   }
   return (
-    <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground">
-      <FileQuestion className="h-10 w-10" />
+    <div className="flex h-64 flex-col items-center justify-center gap-3 text-muted-foreground animate-fade-in">
+      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted">
+        <FileQuestion className="h-7 w-7" />
+      </div>
       <p className="text-sm">This file type can&apos;t be previewed in the browser.</p>
       <a
         href={state.url}
         download={item.title ?? "download"}
-        className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground"
+        className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-foreground shadow-soft transition-transform hover:-translate-y-0.5"
       >
         <Download className="h-3.5 w-3.5" />
         Download file

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_, or_
 
 from app.deps import get_current_user, get_db_session
 from app.models.folder import Folder
@@ -50,6 +50,11 @@ async def create_folder(
                 status_code=400, detail="Maximum folder depth is 3 levels"
             )
 
+    smart_filter_json = None
+    if payload.is_smart and payload.smart_filter:
+        # mode="json" serializes datetime -> ISO string so it's JSONB-safe.
+        smart_filter_json = payload.smart_filter.model_dump(mode="json", exclude_none=True)
+
     folder = Folder(
         user_id=user_id,
         parent_id=payload.parent_id,
@@ -57,6 +62,8 @@ async def create_folder(
         emoji=payload.emoji,
         color=payload.color,
         depth=depth,
+        is_smart=payload.is_smart,
+        smart_filter=smart_filter_json,
     )
     db.add(folder)
     await db.commit()
@@ -133,7 +140,70 @@ async def delete_folder(
     await db.commit()
 
 
+@router.get("/{folder_id}/items")
+async def get_folder_items(
+    folder_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 20,
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """List items in a folder. For smart folders, dynamically applies the saved filter."""
+    from app.schemas.item import ItemResponse, ItemListResponse
+    from sqlalchemy.orm import selectinload
+
+    folder = await _get_folder_or_404(db, folder_id, user_id)
+
+    if folder.is_smart and folder.smart_filter:
+        sf = folder.smart_filter
+        filters = [Item.user_id == user_id, Item.deleted_at.is_(None)]
+
+        if sf.get("content_type"):
+            filters.append(Item.content_type == sf["content_type"])
+        if sf.get("tags"):
+            filters.append(Item.tags.overlap(sf["tags"]))
+        if sf.get("is_starred") is not None:
+            filters.append(Item.is_starred == sf["is_starred"])
+        if sf.get("date_from"):
+            filters.append(Item.created_at >= _parse_iso(sf["date_from"]))
+        if sf.get("date_to"):
+            filters.append(Item.created_at <= _parse_iso(sf["date_to"]))
+    else:
+        filters = [
+            Item.user_id == user_id,
+            Item.folder_id == folder_id,
+            Item.deleted_at.is_(None),
+        ]
+
+    total = (await db.execute(select(func.count()).select_from(Item).where(and_(*filters)))).scalar_one()
+    rows = (
+        await db.execute(
+            select(Item)
+            .options(selectinload(Item.folder))
+            .where(and_(*filters))
+            .order_by(Item.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+
+    return ItemListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        results=[ItemResponse.model_validate(i) for i in rows],
+    )
+
+
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
+def _parse_iso(value):
+    """Parse an ISO timestamp from a smart_filter; tolerate a trailing 'Z'
+    (Python <3.11 fromisoformat rejects it) and already-parsed datetimes."""
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
 
 async def _get_folder_or_404(db: AsyncSession, folder_id: uuid.UUID, user_id: uuid.UUID) -> Folder:
     q = select(Folder).where(Folder.id == folder_id, Folder.user_id == user_id)

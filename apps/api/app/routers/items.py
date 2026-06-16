@@ -3,13 +3,14 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, status
 from fastapi.responses import RedirectResponse, Response as PlainResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, update as sa_update
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.deps import get_current_user, get_db_session
 from app.models.item import Item
 from app.models.folder import Folder
+from app.models.user import User
 from app.graph.neo4j_client import neo4j_client
 from app.cache.redis_client import invalidate_graph_cache
 from app import storage
@@ -110,6 +111,13 @@ async def upload_file(
     storage_key = storage.build_storage_key(str(user_id), str(item.id), filename)
     storage.save_file(storage_key, content)
     item.storage_key = storage_key
+
+    # Track storage usage for the user
+    await db.execute(
+        sa_update(User)
+        .where(User.id == user_id)
+        .values(storage_used=User.storage_used + len(content))
+    )
 
     await db.commit()
     await db.refresh(item)
@@ -300,7 +308,15 @@ async def delete_item(
     db: AsyncSession = Depends(get_db_session),
 ):
     item = await _get_item_or_404(db, item_id, user_id)
+    file_size = item.file_size or 0
     item.deleted_at = datetime.utcnow()
+    # Reclaim storage for this user
+    if file_size > 0:
+        await db.execute(
+            sa_update(User)
+            .where(User.id == user_id)
+            .values(storage_used=func.greatest(0, User.storage_used - file_size))
+        )
     await db.commit()
 
 
@@ -372,6 +388,82 @@ async def unlink_items(
         await neo4j_client.delete_user_link(str(item_id), str(target_id))
         await neo4j_client.delete_user_link(str(target_id), str(item_id))
         await invalidate_graph_cache(str(user_id))
+
+
+@router.get("/{item_id}/similar", response_model=ItemListResponse)
+async def get_similar_items(
+    item_id: uuid.UUID,
+    limit: int = Query(10, ge=1, le=50),
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Return items most semantically similar to this one via pgvector cosine distance."""
+    item = await _get_item_or_404(db, item_id, user_id)
+    if item.embedding is None:
+        return ItemListResponse(total=0, page=1, page_size=limit, results=[])
+
+    q = (
+        select(Item)
+        .options(selectinload(Item.folder))
+        .where(
+            Item.user_id == user_id,
+            Item.deleted_at.is_(None),
+            Item.id != item_id,
+            Item.embedding.is_not(None),
+        )
+        .order_by(Item.embedding.cosine_distance(item.embedding))
+        .limit(limit)
+    )
+    items = (await db.execute(q)).scalars().all()
+    return ItemListResponse(
+        total=len(items),
+        page=1,
+        page_size=limit,
+        results=[ItemResponse.model_validate(i) for i in items],
+    )
+
+
+@router.get("/{item_id}/backlinks", response_model=ItemListResponse)
+async def get_item_backlinks(
+    item_id: uuid.UUID,
+    user_id: uuid.UUID = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Return items that have edges pointing to this item."""
+    await _get_item_or_404(db, item_id, user_id)
+
+    from app.models.edge import Edge
+
+    edge_rows = (
+        await db.execute(
+            select(Edge).where(
+                Edge.user_id == user_id,
+                Edge.target_id == item_id,
+            )
+        )
+    ).scalars().all()
+
+    source_ids = {e.source_id for e in edge_rows}
+    if not source_ids:
+        return ItemListResponse(total=0, page=1, page_size=50, results=[])
+
+    items = (
+        await db.execute(
+            select(Item)
+            .options(selectinload(Item.folder))
+            .where(
+                Item.id.in_(source_ids),
+                Item.user_id == user_id,
+                Item.deleted_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    return ItemListResponse(
+        total=len(items),
+        page=1,
+        page_size=50,
+        results=[ItemResponse.model_validate(i) for i in items],
+    )
 
 
 @router.get("/{item_id}/links", response_model=list[ItemResponse])

@@ -12,7 +12,7 @@ psycopg2-binary==2.9.10      # alembic sync migrations
 
 # Auth
 python-jose[cryptography]==3.3.0
-httpx==0.28.0
+httpx==0.27.2
 
 # Cache
 redis[asyncio]==5.2.0
@@ -39,10 +39,15 @@ email-validator==2.2.0
 # Utilities
 python-dotenv==1.0.1
 boto3==1.35.86
+supabase==2.10.0
 tenacity==9.0.0
 beautifulsoup4==4.12.3
 lxml==5.3.0
 pypdf==5.1.0
+python-docx==1.1.2
+openpyxl==3.1.5
+python-pptx==1.0.2
+slowapi==0.1.9
 
 # Dev / test
 pytest==8.3.4

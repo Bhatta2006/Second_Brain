@@ -195,7 +195,13 @@ async def chat_proxy(
     if not payload.api_key:
         raise HTTPException(status_code=400, detail="api_key is required")
 
-    log.warning("DEBUG chat: context_item_ids=%s", payload.context_item_ids)
+    # Normalize messages defensively — a malformed entry missing role/content
+    # must not raise a KeyError (which would escape the httpx try/except → 500).
+    payload.messages = [
+        {"role": m.get("role", "user"), "content": m.get("content", "")}
+        for m in payload.messages
+        if isinstance(m, dict)
+    ]
 
     last_user_msg = next(
         (m["content"] for m in reversed(payload.messages) if m["role"] == "user"),

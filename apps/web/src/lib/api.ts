@@ -141,6 +141,8 @@ export const itemsApi = {
   unlink: (sourceId: string, targetId: string) =>
     apiFetch<void>(`/items/${sourceId}/link/${targetId}`, { method: "DELETE" }),
   links: (id: string) => apiFetch<Item[]>(`/items/${id}/links`),
+  similar: (id: string, limit = 8) => apiFetch<ItemListResponse>(`/items/${id}/similar?limit=${limit}`),
+  backlinks: (id: string) => apiFetch<ItemListResponse>(`/items/${id}/backlinks`),
   delete: (id: string) => apiFetch<void>(`/items/${id}`, { method: "DELETE" }),
 };
 
@@ -163,16 +165,61 @@ export type Folder = {
 
 export const foldersApi = {
   tree: () => apiFetch<Folder[]>("/folders"),
-  create: (data: { name: string; parent_id?: string; emoji?: string; color?: string }) =>
-    apiFetch<Folder>("/folders", { method: "POST", body: JSON.stringify(data) }),
+  create: (data: {
+    name: string;
+    parent_id?: string;
+    emoji?: string;
+    color?: string;
+    is_smart?: boolean;
+    smart_filter?: {
+      content_type?: string;
+      tags?: string[];
+      is_starred?: boolean;
+      date_from?: string;
+      date_to?: string;
+    };
+  }) => apiFetch<Folder>("/folders", { method: "POST", body: JSON.stringify(data) }),
   update: (
     id: string,
     data: Partial<{ name: string; emoji: string; color: string; parent_id: string | null }>
   ) => apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
-  // Move a folder under a new parent. null = move to root.
   move: (id: string, parentId: string | null) =>
     apiFetch<Folder>(`/folders/${id}`, { method: "PATCH", body: JSON.stringify({ parent_id: parentId }) }),
   delete: (id: string) => apiFetch<void>(`/folders/${id}`, { method: "DELETE" }),
+  items: (id: string, page = 1) => apiFetch<ItemListResponse>(`/folders/${id}/items?page=${page}`),
+};
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+
+export const exportApi = {
+  json: async () => {
+    const token = await getAccessToken();
+    const res = await fetch(`${API_BASE}/api/v1/export`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `secondbrain_export_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  zip: async () => {
+    const token = await getAccessToken();
+    const res = await fetch(`${API_BASE}/api/v1/export/zip`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error("Export failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `secondbrain_export_${new Date().toISOString().slice(0, 10)}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
 
 // ── Search ─────────────────────────────────────────────────────────────────
@@ -193,14 +240,35 @@ export type SearchResponse = {
 };
 
 export const searchApi = {
-  search: (q: string, params?: { content_type?: string; folder_id?: string; tags?: string[]; page?: number }) => {
+  search: (q: string, params?: {
+    content_type?: string;
+    folder_id?: string;
+    tags?: string[];
+    date_from?: string;
+    date_to?: string;
+    is_starred?: boolean;
+    page?: number;
+  }) => {
     const qs = new URLSearchParams({ q });
     if (params?.content_type) qs.set("content_type", params.content_type);
     if (params?.folder_id) qs.set("folder_id", params.folder_id);
     if (params?.tags) params.tags.forEach((t) => qs.append("tags", t));
+    if (params?.date_from) qs.set("date_from", params.date_from);
+    if (params?.date_to) qs.set("date_to", params.date_to);
+    if (params?.is_starred != null) qs.set("is_starred", String(params.is_starred));
     if (params?.page) qs.set("page", String(params.page));
     return apiFetch<SearchResponse>(`/search?${qs}`);
   },
+  semantic: (payload: {
+    query: string;
+    content_type?: string;
+    folder_id?: string;
+    tags?: string[];
+    limit?: number;
+  }) => apiFetch<SearchResponse>("/search/semantic", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  }),
 };
 
 // ── Graph ──────────────────────────────────────────────────────────────────

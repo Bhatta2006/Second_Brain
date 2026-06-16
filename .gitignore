@@ -43,3 +43,6 @@ neo4j_logs/
 # Uploads / temp
 uploads/
 tmp/
+
+# TS build cache
+*.tsbuildinfo

@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.deps import get_current_user, get_db_session
@@ -155,7 +156,9 @@ async def _graph_postgres(
     item_ids = set(list(item_ids)[:limit])
     items = (
         await db.execute(
-            select(Item).where(
+            select(Item)
+            .options(selectinload(Item.folder))
+            .where(
                 Item.id.in_(item_ids),
                 Item.user_id == user_id,
                 Item.deleted_at.is_(None),
@@ -227,7 +230,9 @@ async def get_neighbours(
     }
     neighbours_db = (
         await db.execute(
-            select(Item).where(
+            select(Item)
+            .options(selectinload(Item.folder))
+            .where(
                 Item.id.in_(neighbour_ids),
                 Item.user_id == user_id,
                 Item.deleted_at.is_(None),

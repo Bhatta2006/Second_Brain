@@ -2,7 +2,7 @@ services:
   # ─── PostgreSQL + pgvector ─────────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: secondbrain-postgres
+    container_name: S-Brain-postgres
     restart: unless-stopped
     ports:
       - "5432:5432"
@@ -22,7 +22,7 @@ services:
   # ─── Redis ─────────────────────────────────────────────────────────────────
   redis:
     image: redis:7.2-alpine
-    container_name: secondbrain-redis
+    container_name: S-Brain-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -37,7 +37,7 @@ services:
   # ─── Neo4j ─────────────────────────────────────────────────────────────────
   neo4j:
     image: neo4j:5.18-community
-    container_name: secondbrain-neo4j
+    container_name: S-Brain-neo4j
     restart: unless-stopped
     ports:
       - "7474:7474"   # HTTP browser
@@ -60,7 +60,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    container_name: secondbrain-api
+    container_name: S-Brain-api
     restart: unless-stopped
     ports:
       - "8000:8000"
@@ -87,7 +87,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    container_name: secondbrain-worker
+    container_name: S-Brain-worker
     restart: unless-stopped
     env_file:
       - .env
@@ -112,7 +112,7 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    container_name: secondbrain-beat
+    container_name: S-Brain-beat
     restart: unless-stopped
     env_file:
       - .env
@@ -134,22 +134,34 @@ services:
     build:
       context: ./apps/web
       dockerfile: Dockerfile
-    container_name: secondbrain-web
+      target: dev
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-https://eqniokgdzmrnamqyrnda.supabase.co}
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVxbmlva2dkem1ybmFtcXlybmRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NzE1MzUsImV4cCI6MjA5NDI0NzUzNX0.vXG2s7UdTw93lIWoMp7328T-tAttmZem8_lYkPgbjQI}
+    container_name: S-Brain-web
     restart: unless-stopped
     ports:
       - "3000:3000"
     env_file:
       - .env
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://eqniokgdzmrnamqyrnda.supabase.co}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVxbmlva2dkem1ybmFtcXlybmRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NzE1MzUsImV4cCI6MjA5NDI0NzUzNX0.vXG2s7UdTw93lIWoMp7328T-tAttmZem8_lYkPgbjQI}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
     depends_on:
       - api
     volumes:
-      - ./apps/web:/app
-      - /app/node_modules
-      - /app/.next
+      - ./apps/web/src:/app/src
+      - ./apps/web/public:/app/public
+      - ./apps/web/package.json:/app/package.json
+      - ./apps/web/next.config.mjs:/app/next.config.mjs
+      - ./apps/web/tsconfig.json:/app/tsconfig.json
+      - ./apps/web/tailwind.config.ts:/app/tailwind.config.ts
+      - ./apps/web/postcss.config.js:/app/postcss.config.js
     command: pnpm dev
 
 volumes:

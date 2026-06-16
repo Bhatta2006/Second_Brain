@@ -3,11 +3,21 @@ from datetime import datetime
 from pydantic import BaseModel
 
 
+class SmartFilter(BaseModel):
+    content_type: str | None = None
+    tags: list[str] = []
+    is_starred: bool | None = None
+    date_from: datetime | None = None
+    date_to: datetime | None = None
+
+
 class FolderCreate(BaseModel):
     name: str
     parent_id: uuid.UUID | None = None
     emoji: str | None = None
     color: str | None = None
+    is_smart: bool = False
+    smart_filter: SmartFilter | None = None
 
 
 class FolderUpdate(BaseModel):

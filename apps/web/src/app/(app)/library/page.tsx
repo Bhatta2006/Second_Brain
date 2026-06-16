@@ -7,12 +7,14 @@ import {
   FolderInput, Copy, Star, MoveRight, Link as LinkIcon,
   FileText, Link2, Image as ImageIcon, FileQuestion,
 } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
 import { itemsApi, foldersApi, type Item, type Folder } from "@/lib/api";
 import { ContextMenu, type MenuItem } from "@/components/ui/ContextMenu";
 import { FolderPickerDialog } from "@/components/folders/FolderPickerDialog";
 import { ItemPickerDialog } from "@/components/items/ItemPickerDialog";
 import { FileContent } from "@/components/items/FileContent";
 import { TabBar, type WorkspaceTab } from "@/components/workspace/TabBar";
+import { FadeUp, EASE_OUT } from "@/components/ui/motion";
 import { cn } from "@/lib/utils";
 
 type CtxMenu =
@@ -61,14 +63,21 @@ function TreeItem({
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       className={cn(
-        "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-sm transition-colors",
-        active ? "bg-accent font-medium" : "hover:bg-muted text-muted-foreground"
+        "group relative flex w-full items-center gap-2 rounded-lg py-1.5 pr-2 text-sm transition-colors",
+        active
+          ? "bg-brand-muted font-medium text-brand"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground"
       )}
       style={{ paddingLeft: `${18 + depth * 14}px` }}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {active && (
+        <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-brand" />
+      )}
+      <Icon className={cn("h-3.5 w-3.5 shrink-0", active ? "text-brand" : "opacity-70")} />
       <span className="truncate text-left">{itemLabel(item)}</span>
-      {item.is_starred && <Star className="h-3 w-3 shrink-0 text-yellow-500 ml-auto" fill="currentColor" />}
+      {item.is_starred && (
+        <Star className="ml-auto h-3 w-3 shrink-0 text-brand" fill="currentColor" />
+      )}
     </button>
   );
 }
@@ -114,10 +123,13 @@ function TreeFolder({
     <div>
       <div
         onContextMenu={(e) => onFolderContextMenu(e, folder)}
-        className="group flex w-full items-center gap-1 rounded-md pr-2 text-sm text-muted-foreground hover:bg-muted transition-colors"
+        className="group flex w-full items-center gap-1 rounded-lg pr-2 text-sm text-foreground/80 hover:bg-accent hover:text-foreground transition-colors"
         style={{ paddingLeft: `${4 + depth * 14}px` }}
       >
-        <button onClick={() => setOpen(!open)} className="p-1 shrink-0">
+        <button
+          onClick={() => setOpen(!open)}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted-foreground transition-transform hover:text-foreground"
+        >
           {hasContents ? (
             open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />
           ) : (
@@ -136,17 +148,19 @@ function TreeFolder({
               if (e.key === "Escape") cancelRename();
             }}
             autoFocus
-            className="flex-1 min-w-0 rounded border border-primary bg-background px-1 py-0.5 text-sm outline-none"
+            className="min-w-0 flex-1 rounded-md border border-brand bg-background px-1.5 py-0.5 text-sm outline-none ring-2 ring-brand/30"
           />
         ) : (
           <button
             onClick={() => setOpen(!open)}
-            className="flex-1 min-w-0 py-1.5 text-left truncate font-medium"
+            className="min-w-0 flex-1 truncate py-1.5 text-left font-medium"
           >
             {folder.name}
           </button>
         )}
-        <span className="text-xs opacity-50 shrink-0">{folder.item_count}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted-foreground opacity-70">
+          {folder.item_count}
+        </span>
       </div>
 
       {open && (
@@ -381,20 +395,21 @@ export default function LibraryPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* File-tree sidebar */}
-      <div className="w-64 shrink-0 border-r border-border bg-card overflow-y-auto p-2">
-        <div className="flex items-center justify-between px-2 py-1 mb-1">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+      <div className="w-64 shrink-0 overflow-y-auto border-r border-border bg-card p-2">
+        <div className="mb-2 flex items-center justify-between px-2 py-1">
+          <p className="font-display text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Files
           </p>
           <button
             onClick={() => createFolder(null)}
             title="New folder"
-            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+            className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-accent hover:text-brand"
           >
             <FolderPlus className="h-4 w-4" />
           </button>
         </div>
 
+        <FadeUp className="space-y-0.5">
         {folders?.map((folder) => (
           <TreeFolder
             key={folder.id}
@@ -435,10 +450,11 @@ export default function LibraryPage() {
         ))}
 
         {folders?.length === 0 && rootItems.length === 0 && (
-          <p className="px-2 py-3 text-xs text-muted-foreground">
+          <p className="px-2 py-3 text-xs leading-relaxed text-muted-foreground">
             No files yet. Save something from the Inbox, then organise it here.
           </p>
         )}
+        </FadeUp>
       </div>
 
       {/* Tabbed workspace */}
@@ -451,37 +467,58 @@ export default function LibraryPage() {
           onNewTab={newTab}
         />
 
-        <div className="flex-1 overflow-auto bg-muted/20 p-6">
+        <div className="flex-1 overflow-auto bg-muted/20 bg-dots p-6">
           {!activeTab && (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <p className="text-lg font-medium">No tab open</p>
-                <p className="text-sm mt-1">Click a file in the sidebar, or press + for a new tab.</p>
+              <div className="animate-fade-up text-center">
+                <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-border bg-card shadow-soft">
+                  <FileText className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="font-display text-lg font-semibold text-foreground">No tab open</p>
+                <p className="mt-1 text-sm">Click a file in the sidebar, or press + for a new tab.</p>
               </div>
             </div>
           )}
 
           {activeTab && !activeItem && (
             <div className="flex h-full items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <p className="text-lg font-medium">Empty tab</p>
-                <p className="text-sm mt-1">Pick a file from the sidebar to open it here.</p>
+              <div className="animate-fade-up text-center">
+                <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl border border-border bg-card shadow-soft">
+                  <FileQuestion className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <p className="font-display text-lg font-semibold text-foreground">Empty tab</p>
+                <p className="mt-1 text-sm">Pick a file from the sidebar to open it here.</p>
               </div>
             </div>
           )}
 
-          {activeItem && (
-            <div className="mx-auto max-w-4xl">
-              <div className="mb-4 border-b border-border pb-3">
-                <h1 className="text-lg font-semibold">{itemLabel(activeItem)}</h1>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {activeItem.content_type}
-                  {activeItem.folder && ` · 📁 ${activeItem.folder.name}`}
-                </p>
-              </div>
-              <FileContent item={activeItem} />
-            </div>
-          )}
+          <AnimatePresence mode="wait">
+            {activeItem && (
+              <motion.div
+                key={activeItem.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.3, ease: EASE_OUT }}
+                className="mx-auto max-w-4xl"
+              >
+                <div className="mb-5 border-b border-border pb-4">
+                  <h1 className="font-display text-xl font-semibold tracking-tight text-foreground">
+                    {itemLabel(activeItem)}
+                  </h1>
+                  <p className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="rounded-md bg-muted px-1.5 py-0.5 font-mono uppercase tracking-wide">
+                      {activeItem.content_type}
+                    </span>
+                    {activeItem.folder && (
+                      <span className="truncate">📁 {activeItem.folder.name}</span>
+                    )}
+                  </p>
+                </div>
+                <FileContent item={activeItem} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
