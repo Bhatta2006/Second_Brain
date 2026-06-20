@@ -62,6 +62,7 @@ async def upload_file(
     folder_id: uuid.UUID | None = Form(None),
     title_override: str | None = Form(None),
     tags_override: str | None = Form(None),   # JSON-encoded list[str]
+    ai_organise: bool = Form(False),          # let the AI pick/create a folder
     user_id: uuid.UUID = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_session),
 ):
@@ -103,6 +104,7 @@ async def upload_file(
             "filename": filename,
             "user_set_title": bool((title_override or "").strip()),
             "user_set_tags": bool(user_tags),
+            "ai_organise": bool(ai_organise),
         },
     )
     db.add(item)

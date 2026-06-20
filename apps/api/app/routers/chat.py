@@ -214,6 +214,10 @@ async def chat_proxy(
     system_prompt = _build_system_prompt(auto_ctx, pinned_ctx)
     msgs_no_system = [m for m in payload.messages if m["role"] != "system"]
 
+    # Log which provider/model is used (no secrets) — useful for debugging which
+    # backend a chat actually hit.
+    log.info("CHAT → provider=%s model=%s", payload.provider, payload.model)
+
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             if payload.provider == "gemini":

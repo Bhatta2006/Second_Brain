@@ -4,8 +4,8 @@ import { useState, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, FileText, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { itemsApi } from "@/lib/api";
-import { UploadOptionsDialog } from "./UploadOptionsDialog";
+import { itemsApi, foldersApi } from "@/lib/api";
+import { UploadOptionsDialog, type Destination } from "./UploadOptionsDialog";
 import { SPRING, EASE_OUT } from "@/components/ui/motion";
 
 type Mode = "file" | "url" | "text";
@@ -46,13 +46,32 @@ export function UploadZone({ onSuccess }: Props) {
     setValue(f.name);
   }
 
-  async function doFileUpload(titleOverride?: string, tagsOverride?: string[]) {
+  /** Resolve a Destination into the concrete fields the API needs.
+   *  Creating a new folder happens here (one folders.create call). */
+  async function resolveDestination(
+    dest?: Destination
+  ): Promise<{ folderId?: string; aiOrganise: boolean }> {
+    if (!dest || dest.kind === "ai") return { aiOrganise: true };
+    if (dest.kind === "existing") return { folderId: dest.folderId, aiOrganise: false };
+    if (dest.kind === "new") {
+      const folder = await foldersApi.create({ name: dest.folderName });
+      return { folderId: folder.id, aiOrganise: false };
+    }
+    return { aiOrganise: false }; // "none" → uncategorised
+  }
+
+  async function doFileUpload(
+    titleOverride?: string,
+    tagsOverride?: string[],
+    dest?: Destination
+  ) {
     if (!file) return;
     setShowOptions(false);
     setError(null);
     setLoading(true);
     try {
-      const res = await itemsApi.upload(file, undefined, titleOverride, tagsOverride);
+      const { folderId, aiOrganise } = await resolveDestination(dest);
+      const res = await itemsApi.upload(file, folderId, titleOverride, tagsOverride, aiOrganise);
       setValue("");
       setFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -68,19 +87,23 @@ export function UploadZone({ onSuccess }: Props) {
     ingestMode: "url" | "text",
     ingestValue: string,
     titleOverride?: string,
-    tagsOverride?: string[]
+    tagsOverride?: string[],
+    dest?: Destination
   ) {
     setPendingIngest(null);
     setShowOptions(false);
     setError(null);
     setLoading(true);
     try {
+      const { folderId, aiOrganise } = await resolveDestination(dest);
       const res = await itemsApi.ingest({
         type: ingestMode,
         ...(ingestMode === "url" ? { url: ingestValue } : { text: ingestValue }),
+        ...(folderId ? { hint_folder_id: folderId } : {}),
         metadata: {
           ...(titleOverride ? { title: titleOverride } : {}),
           ...(tagsOverride?.length ? { tags: tagsOverride, user_set_tags: true } : {}),
+          ...(aiOrganise ? { ai_organise: true } : {}),
         },
       });
       setValue("");
@@ -267,8 +290,8 @@ export function UploadZone({ onSuccess }: Props) {
       {showOptions && file && mode === "file" && (
         <UploadOptionsDialog
           defaultTitle={file.name}
-          onSave={(title, tags) => doFileUpload(title, tags)}
-          onSkip={() => doFileUpload()}
+          onSave={(title, tags, dest) => doFileUpload(title, tags, dest)}
+          onSkip={() => doFileUpload(undefined, undefined, { kind: "ai" })}
           onClose={() => setShowOptions(false)}
         />
       )}
@@ -277,8 +300,12 @@ export function UploadZone({ onSuccess }: Props) {
       {showOptions && pendingIngest && (
         <UploadOptionsDialog
           defaultTitle={pendingIngest.defaultTitle}
-          onSave={(title, tags) => doIngest(pendingIngest.mode, pendingIngest.value, title, tags)}
-          onSkip={() => doIngest(pendingIngest.mode, pendingIngest.value)}
+          onSave={(title, tags, dest) =>
+            doIngest(pendingIngest.mode, pendingIngest.value, title, tags, dest)
+          }
+          onSkip={() =>
+            doIngest(pendingIngest.mode, pendingIngest.value, undefined, undefined, { kind: "ai" })
+          }
           onClose={() => { setShowOptions(false); setPendingIngest(null); }}
         />
       )}

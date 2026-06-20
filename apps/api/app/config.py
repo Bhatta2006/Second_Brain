@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     classification_model: str = "openai/gpt-4o"
     summarisation_model: str = "openai/gpt-4o-mini"
 
+    # ── Embeddings (app-wide; dim MUST match the pgvector column) ────────────
+    # provider: "github" (Azure SDK, 1536-dim) or "nebius"/"custom"
+    # (OpenAI-compatible /embeddings endpoint).
+    embedding_provider: str = "nebius"
+    embedding_dim: int = 4096
+    # Used when embedding_provider != "github". Falls back to github creds if blank.
+    embedding_base_url: str = "https://api.tokenfactory.nebius.com/v1/"
+    embedding_api_key: str = ""
+
     # Feature flags
     use_neo4j_graph: bool = True   # False = fallback to PostgreSQL edges table
 

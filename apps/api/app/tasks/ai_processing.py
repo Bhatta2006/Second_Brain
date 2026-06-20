@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 
 import httpx
@@ -31,6 +32,7 @@ from sqlalchemy import update, select
 from app.tasks.celery_app import celery_app
 from app.tasks._db import task_session
 from app.models.item import Item
+from app.models.folder import Folder
 from app.ai.llm import classify_item, summarise
 from app.ai.embeddings import embed_item
 
@@ -38,6 +40,7 @@ log = logging.getLogger(__name__)
 
 MAX_TEXT_FOR_AI = 8000   # chars sent to classifier
 URL_TIMEOUT = 15
+MAX_FOLDER_DEPTH = 2     # 0-indexed; 3 levels total (matches folders router cap)
 
 
 # ── Content extraction ────────────────────────────────────────────────────────
@@ -220,6 +223,79 @@ def _pick_content(item: Item, fetched: str, image_desc: str = "") -> str:
     return ""
 
 
+# ── AI folder routing ───────────────────────────────────────────────────────
+
+async def _load_folders(db, user_id: str) -> list[Folder]:
+    return list(
+        (await db.execute(select(Folder).where(Folder.user_id == user_id))).scalars().all()
+    )
+
+
+def _folder_tree_json(folders: list[Folder]) -> str:
+    """Compact JSON of the user's folders so the classifier can reuse existing
+    ones instead of always inventing new paths."""
+    import json as _json
+    by_id = {f.id: f for f in folders}
+
+    def path_of(f: Folder) -> list[str]:
+        chain, cur, guard = [], f, 0
+        while cur is not None and guard < 5:
+            chain.append(cur.name)
+            cur = by_id.get(cur.parent_id) if cur.parent_id else None
+            guard += 1
+        return list(reversed(chain))
+
+    return _json.dumps([path_of(f) for f in folders], ensure_ascii=False)
+
+
+async def _resolve_folder_path(
+    db, user_id: str, path: list[str]
+) -> "uuid.UUID | None":
+    """Map an AI-suggested folder path (e.g. ["Learning", "Group Theory"]) to a
+    real folder id. Reuses existing folders (case-insensitive) at each level and
+    creates the missing tail segments (marked ai_generated). Returns the leaf id.
+
+    Strategy: prefer existing, create if needed (capped at 3 levels)."""
+    import uuid as _uuid
+
+    clean = [seg.strip() for seg in (path or []) if seg and seg.strip()]
+    if not clean:
+        return None
+    clean = clean[: MAX_FOLDER_DEPTH + 1]  # never exceed the 3-level cap
+
+    folders = await _load_folders(db, user_id)
+    # index existing folders by (parent_id, lowercased name) for O(1) level lookup
+    index: dict[tuple, Folder] = {
+        (f.parent_id, f.name.strip().lower()): f for f in folders
+    }
+
+    parent_id = None
+    leaf_id = None
+    for depth, segment in enumerate(clean):
+        key = (parent_id, segment.lower())
+        existing = index.get(key)
+        if existing is not None:
+            parent_id = existing.id
+            leaf_id = existing.id
+            continue
+        # create this segment
+        new_folder = Folder(
+            user_id=_uuid.UUID(user_id),
+            parent_id=parent_id,
+            name=segment,
+            depth=depth,
+            ai_generated=True,
+        )
+        db.add(new_folder)
+        await db.flush()  # assign id
+        index[key] = new_folder
+        parent_id = new_folder.id
+        leaf_id = new_folder.id
+        log.info("AI created folder '%s' (depth=%d) for user %s", segment, depth, user_id)
+
+    return leaf_id
+
+
 # ── Main task ─────────────────────────────────────────────────────────────────
 
 @celery_app.task(
@@ -262,10 +338,19 @@ async def _process(item_id: str, user_id: str) -> None:
 
         meta = item.metadata_ or {}
         user_set_tags = bool(meta.get("user_set_tags"))
+        ai_organise = bool(meta.get("ai_organise"))
+
+        # Only feed the existing folder tree to the classifier when we actually
+        # intend to auto-file — saves tokens otherwise.
+        folder_tree_json = "[]"
+        if ai_organise and item.folder_id is None:
+            folders = await _load_folders(db, str(item.user_id))
+            folder_tree_json = _folder_tree_json(folders)
 
         classification = await classify_item(
             content_type=item.content_type,
             content_text=content,
+            folder_tree_json=folder_tree_json,
             skip_tags=user_set_tags,
         )
 
@@ -284,23 +369,43 @@ async def _process(item_id: str, user_id: str) -> None:
 
         confidence = float(classification.get("confidence") or 0.0)
 
-        await db.execute(
-            update(Item)
-            .where(Item.id == item_id)
-            .values(
-                ai_title=classification.get("title") or None,
-                summary=summary or None,
-                tags=final_tags,
-                entities=classification.get("entities") or {},
-                confidence=confidence,
-                needs_review=confidence < 0.5,
-                embedding=embedding,
-                indexed_at=datetime.utcnow(),
-                raw_text=content if not item.raw_text else item.raw_text,
+        # AI folder routing — only when the user opted in AND left the folder
+        # blank (an explicit manual choice always wins).
+        resolved_folder_id = None
+        if ai_organise and item.folder_id is None:
+            resolved_folder_id = await _resolve_folder_path(
+                db, str(item.user_id), classification.get("suggested_folder") or []
             )
+
+        values = dict(
+            ai_title=classification.get("title") or None,
+            summary=summary or None,
+            tags=final_tags,
+            entities=classification.get("entities") or {},
+            confidence=confidence,
+            needs_review=confidence < 0.5,
+            embedding=embedding,
+            indexed_at=datetime.utcnow(),
+            raw_text=content if not item.raw_text else item.raw_text,
         )
+        if resolved_folder_id is not None:
+            values["folder_id"] = resolved_folder_id
+
+        await db.execute(update(Item).where(Item.id == item_id).values(**values))
         await db.commit()
-        log.info("AI processing complete for %s (conf=%.2f)", item_id, confidence)
+        log.info(
+            "AI processing complete for %s (conf=%.2f, folder=%s)",
+            item_id, confidence, resolved_folder_id,
+        )
+
+        # Sync the resolved folder name to the Neo4j node (used by cluster mode).
+        if resolved_folder_id is not None:
+            folder = await db.get(Folder, resolved_folder_id)
+            if folder is not None:
+                from app.tasks.sync import update_item_folder
+                update_item_folder.delay(
+                    str(item_id), folder.name, str(resolved_folder_id)
+                )
 
     await _trigger_sync(item_id, user_id)
 

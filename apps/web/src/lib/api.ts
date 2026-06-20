@@ -117,12 +117,19 @@ export const itemsApi = {
     method: "POST",
     body: JSON.stringify(payload),
   }),
-  upload: (file: File, folderId?: string, titleOverride?: string, tagsOverride?: string[]) => {
+  upload: (
+    file: File,
+    folderId?: string | null,
+    titleOverride?: string,
+    tagsOverride?: string[],
+    aiOrganise?: boolean
+  ) => {
     const fd = new FormData();
     fd.append("file", file);
     if (folderId) fd.append("folder_id", folderId);
     if (titleOverride) fd.append("title_override", titleOverride);
     if (tagsOverride?.length) fd.append("tags_override", JSON.stringify(tagsOverride));
+    if (aiOrganise) fd.append("ai_organise", "true");
     return apiUpload<{ item_id: string; status: string }>("/items/upload", fd);
   },
   update: (
@@ -307,6 +314,23 @@ export const graphApi = {
     if (params?.min_weight) qs.set("min_weight", String(params.min_weight));
     return apiFetch<GraphResponse>(`/graph?${qs}`);
   },
+};
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+
+export type EmbeddingConfig = {
+  provider: string;
+  model: string;
+  dimensions: number;
+  base_url: string | null;
+};
+
+export const settingsApi = {
+  getEmbedding: () => apiFetch<EmbeddingConfig>("/settings/embedding"),
+  reembed: () =>
+    apiFetch<{ task_id: string; status: string }>("/settings/embedding/reembed", {
+      method: "POST",
+    }),
 };
 
 // ── Chat Sessions ──────────────────────────────────────────────────────────────
