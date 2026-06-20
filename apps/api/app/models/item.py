@@ -32,7 +32,8 @@ class Item(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(TEXT), nullable=True)
     entities: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536), nullable=True)
+    # Dimension must match settings.embedding_dim. Qwen3-Embedding-8B = 4096.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(4096), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     is_starred: Mapped[bool] = mapped_column(Boolean, default=False)

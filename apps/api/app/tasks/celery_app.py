@@ -20,6 +20,7 @@ celery_app = Celery(
         "app.tasks.edge_generation",
         "app.tasks.sync",
         "app.tasks.ai_processing",
+        "app.tasks.reembed",
     ],
 )
 

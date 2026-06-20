@@ -3,26 +3,69 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Tag, Plus } from "lucide-react";
-import { itemsApi } from "@/lib/api";
+import { X, Tag, Plus, Sparkles, FolderTree, Folder as FolderIcon } from "lucide-react";
+import { itemsApi, foldersApi, type Folder } from "@/lib/api";
 import { SPRING } from "@/components/ui/motion";
+
+/** Where the item should go. Discriminated so the parent knows whether to set a
+ *  folder id, create a new folder, or hand routing to the AI. */
+export type Destination =
+  | { kind: "ai" }
+  | { kind: "existing"; folderId: string }
+  | { kind: "new"; folderName: string }
+  | { kind: "none" };
 
 type Props = {
   defaultTitle: string;
-  onSave: (title: string, tags: string[]) => void;
+  onSave: (title: string, tags: string[], destination: Destination) => void;
   onSkip: () => void;
   onClose: () => void;
 };
+
+/** Flatten the folder tree into "Parent / Child" labels for the picker. */
+function flattenFolders(tree: Folder[], prefix = ""): { id: string; label: string }[] {
+  const out: { id: string; label: string }[] = [];
+  for (const f of tree) {
+    const label = prefix ? `${prefix} / ${f.name}` : f.name;
+    out.push({ id: f.id, label });
+    if (f.children?.length) out.push(...flattenFolders(f.children, label));
+  }
+  return out;
+}
 
 export function UploadOptionsDialog({ defaultTitle, onSave, onSkip, onClose }: Props) {
   const [title, setTitle] = useState(defaultTitle);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
 
+  // Destination: AI by default (the "Let AI organise" path), or a manual folder.
+  const [aiOrganise, setAiOrganise] = useState(true);
+  const [folderId, setFolderId] = useState<string>("");      // "" = uncategorised
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingNew, setCreatingNew] = useState(false);
+
   const { data } = useQuery({
     queryKey: ["items", { page_size: 500 }],
     queryFn: () => itemsApi.list({ page_size: 500 }),
   });
+
+  const { data: folderTree } = useQuery({
+    queryKey: ["folders"],
+    queryFn: () => foldersApi.tree(),
+  });
+
+  const folderOptions = useMemo(
+    () => flattenFolders(folderTree ?? []),
+    [folderTree]
+  );
+
+  function buildDestination(): Destination {
+    if (aiOrganise) return { kind: "ai" };
+    if (creatingNew && newFolderName.trim())
+      return { kind: "new", folderName: newFolderName.trim() };
+    if (folderId) return { kind: "existing", folderId };
+    return { kind: "none" };
+  }
 
   const existingTags = useMemo(() => {
     const tagSet = new Set<string>();
@@ -101,6 +144,104 @@ export function UploadOptionsDialog({ defaultTitle, onSave, onSkip, onClose }: P
                 onChange={(e) => setTitle(e.target.value)}
                 className="mt-1.5 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-shadow focus:ring-2 focus:ring-brand/40"
               />
+            </div>
+
+            {/* Destination */}
+            <div>
+              <label className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <FolderTree className="h-3 w-3" /> Where to save
+              </label>
+
+              {/* AI vs Manual toggle */}
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAiOrganise(true)}
+                  className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                    aiOrganise
+                      ? "border-brand/50 bg-brand-muted text-brand shadow-soft"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Let AI organise
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiOrganise(false)}
+                  className={`flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-all ${
+                    !aiOrganise
+                      ? "border-brand/50 bg-brand-muted text-brand shadow-soft"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <FolderIcon className="h-3.5 w-3.5" /> Choose folder
+                </button>
+              </div>
+
+              <AnimatePresence initial={false}>
+                {aiOrganise ? (
+                  <motion.p
+                    key="ai-hint"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-2 text-xs text-muted-foreground"
+                  >
+                    AI reads your file and routes it to a fitting folder — reusing an
+                    existing one or creating a new one if needed.
+                  </motion.p>
+                ) : (
+                  <motion.div
+                    key="manual"
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="mt-2 space-y-2 overflow-hidden"
+                  >
+                    {!creatingNew ? (
+                      <>
+                        <select
+                          value={folderId}
+                          onChange={(e) => setFolderId(e.target.value)}
+                          className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-shadow focus:ring-2 focus:ring-brand/40"
+                        >
+                          <option value="">Uncategorised (no folder)</option>
+                          {folderOptions.map((f) => (
+                            <option key={f.id} value={f.id}>
+                              {f.label}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => { setCreatingNew(true); setFolderId(""); }}
+                          className="flex items-center gap-1 text-xs font-medium text-brand transition-opacity hover:opacity-80"
+                        >
+                          <Plus className="h-3 w-3" /> Create new folder
+                        </button>
+                      </>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          placeholder="New folder name…"
+                          value={newFolderName}
+                          onChange={(e) => setNewFolderName(e.target.value)}
+                          className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none transition-shadow focus:ring-2 focus:ring-brand/40"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => { setCreatingNew(false); setNewFolderName(""); }}
+                          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Tags */}
@@ -197,7 +338,7 @@ export function UploadOptionsDialog({ defaultTitle, onSave, onSkip, onClose }: P
               Skip — let AI decide
             </button>
             <button
-              onClick={() => onSave(title, selectedTags)}
+              onClick={() => onSave(title, selectedTags, buildDestination())}
               className="rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-soft transition-all hover:opacity-90 active:scale-[0.98]"
             >
               Save with these options

@@ -15,6 +15,7 @@ import {
   Brain,
   Menu,
   X,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
@@ -111,6 +112,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
         <motion.div variants={fadeUpItem}>
           <ThemeToggle />
+        </motion.div>
+
+        <motion.div variants={fadeUpItem}>
+          <Link
+            href="/settings"
+            onClick={onNavigate}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+              pathname.startsWith("/settings")
+                ? "bg-brand-muted text-brand"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            <Settings className="h-4 w-4 shrink-0" />
+            Settings
+          </Link>
         </motion.div>
 
         <motion.div variants={fadeUpItem}>
