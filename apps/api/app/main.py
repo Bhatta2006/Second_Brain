@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 
 from app.config import settings
-from app.routers import health, items, folders, search, graph, chat, export
+from app.routers import health, items, folders, search, graph, chat, export, agent
 
 log = logging.getLogger(__name__)
 
@@ -69,3 +69,4 @@ app.include_router(search.router, prefix=API_PREFIX)
 app.include_router(graph.router, prefix=API_PREFIX)
 app.include_router(chat.router, prefix=API_PREFIX)
 app.include_router(export.router, prefix=API_PREFIX)
+app.include_router(agent.router, prefix=API_PREFIX)

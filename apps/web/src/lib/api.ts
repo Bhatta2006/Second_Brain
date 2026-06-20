@@ -350,3 +350,151 @@ export const chatSessionsApi = {
   delete: (id: string) =>
     apiFetch<void>(`/chat/sessions/${id}`, { method: "DELETE" }),
 };
+
+// ── Agent (Agentic AI) ─────────────────────────────────────────────────────
+
+export type AgentEventType =
+  | "status"
+  | "tool_call"
+  | "tool_result"
+  | "question"
+  | "delete_confirm"
+  | "delta"
+  | "answer"
+  | "error"
+  | "done";
+
+export type AgentToolCallEvent = {
+  type: "tool_call";
+  tool: string;
+  args: Record<string, unknown>;
+};
+
+export type AgentToolResultEvent = {
+  type: "tool_result";
+  result: Record<string, unknown>;
+  summary: string;
+};
+
+export type AgentQuestionEvent = {
+  type: "question";
+  question: string;
+  options: string[];
+  context: string;
+};
+
+export type AgentDeleteConfirmEvent = {
+  type: "delete_confirm";
+  items: Array<{ id: string; title: string; content_type: string; created_at: string }>;
+  folders: Array<{ id: string; name: string }>;
+  reason: string;
+  delete_token: string;
+};
+
+export type AgentDeltaEvent = {
+  type: "delta";
+  text: string;
+};
+
+export type AgentAnswerEvent = {
+  type: "answer";
+  content: string;
+  cited_item_ids: string[];
+};
+
+export type AgentErrorEvent = {
+  type: "error";
+  message: string;
+};
+
+export type AgentStatusEvent = {
+  type: "status";
+  message: string;
+};
+
+export type AgentEvent =
+  | AgentToolCallEvent
+  | AgentToolResultEvent
+  | AgentQuestionEvent
+  | AgentDeleteConfirmEvent
+  | AgentDeltaEvent
+  | AgentAnswerEvent
+  | AgentErrorEvent
+  | AgentStatusEvent
+  | { type: "done" };
+
+export type AgentChatRequest = {
+  provider: "github" | "openai" | "anthropic" | "gemini" | "custom";
+  api_key: string;
+  model: string;
+  base_url?: string;
+  messages: Array<{ role: "user" | "assistant"; content: string }>;
+  context_item_ids?: string[];
+  session_id?: string;
+};
+
+/**
+ * Stream agent events from POST /api/v1/agent.
+ * Returns an async generator that yields typed AgentEvent objects.
+ * The caller is responsible for breaking out of the loop on "done" or "error".
+ */
+export async function* streamAgentChat(
+  payload: AgentChatRequest
+): AsyncGenerator<AgentEvent> {
+  const token = await getAccessToken();
+
+  const res = await fetch(`${API_URL}/api/v1/agent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as Record<string, string>)?.detail ?? `Agent API error ${res.status}`);
+  }
+
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    let currentEvent = "";
+    for (const line of lines) {
+      if (line.startsWith("event: ")) {
+        currentEvent = line.slice(7).trim();
+      } else if (line.startsWith("data: ")) {
+        const rawData = line.slice(6).trim();
+        try {
+          const parsed = JSON.parse(rawData);
+          yield { type: currentEvent, ...parsed } as AgentEvent;
+        } catch {
+          // malformed JSON — skip
+        }
+        currentEvent = "";
+      }
+    }
+  }
+}
+
+/** Confirm a delete after the user typed "DELETE" in the UI. */
+export const agentApi = {
+  confirmDelete: (delete_token: string) =>
+    apiFetch<{ success: boolean; deleted_items: number; deleted_folders: number; message: string }>(
+      "/agent/confirm-delete",
+      { method: "POST", body: JSON.stringify({ delete_token }) }
+    ),
+};
+

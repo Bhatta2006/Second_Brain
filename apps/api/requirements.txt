@@ -27,6 +27,13 @@ elasticsearch[async]==8.17.0
 azure-ai-inference==1.0.0b7
 azure-core==1.32.0
 
+# Agentic AI — OpenAI Agents SDK (provider-agnostic via OpenAIChatCompletionsModel)
+openai-agents>=0.0.19
+openai>=1.78.0
+
+# SSE streaming for agent events (pinned to avoid starlette conflict with fastapi 0.115.5)
+sse-starlette>=1.8.2,<2.0.0
+
 # Task queue
 celery[redis]==5.4.0
 kombu==5.4.2
